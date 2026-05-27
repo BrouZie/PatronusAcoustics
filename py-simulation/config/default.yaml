@@ -1,0 +1,85 @@
+array:
+  ring1_radius: 0.34       # meters
+  ring2_radius: 0.17       # meters
+  n_mics_ring1: 8
+  n_mics_ring2: 8
+  ring_spacing: 0.20       # meters between rings
+
+signal:
+  fs: 48000                # sampling rate (Hz)
+  duration: 15.0            # seconds
+  drone_spl_db: 70         # drone SPL at 1 m (for EIN-based SNR)
+  # snr_db: 25             # optional manual override (EIN-derived if omitted)
+
+mic:
+  snr_dba: 65              # ICS-52000: 65 dBA (94 dB SPL reference)
+  sensitivity_dbFS: -26.0  # dBFS at 94 dB SPL, 1 kHz
+  aop_db_spl: 120.0        # Acoustic Overload Point (dB SPL)
+
+drone:
+  rpm: 6000                # rotor RPM
+  num_blades: 2            # blades per rotor
+  num_rotors: 4            # number of rotors
+  distance: 10.0           # meters from array center (reference)
+  initial_bearing:
+    azimuth_deg: 0.0       # degrees from boresight
+    elevation_deg: 30.0    # degrees from boresight (reference for arc plane)
+  trajectory:
+    type: arc
+    radius: 15.0           # constant distance from array (m)
+    elevation_deg: 25.0    # elevation angle from boresight
+    azimuth_start_deg: -50.0  # sweep start (deg)
+    azimuth_end_deg: 50.0     # sweep end (deg)
+    speed: 1.75            # m/s along the arc (~6.3 km/h)
+
+srpphat:
+  fft_size: 2048
+  hop_length: 512
+  search:
+    azimuth_range: [-60.0, 60.0]
+    elevation_range: [-60.0, 60.0]
+    resolution_deg: 2.0    # degrees per grid step
+  max_freq: 4000.0         # max frequency for SRP (Hz)
+  mode: "phat"             # "phat" or "standard"
+  frequency_weight: 0.0    # 0=flat, 0.5=sqrt, 1=linear, 2=quadratic emphasis on high freqs
+  detection:
+    enabled: true
+    method: peak_to_mean
+    peak_to_mean_threshold_db: 5.0
+
+# ── Environment Simulation ──────────────────────────────────────────────
+# Per-mic thermal noise is derived from mic EIN (94 - snr_dba = 29 dBA)
+# and drone SPL at distance. Set signal.snr_db to override EIN computation.
+#
+# Noise types (wind, traffic, birds, ambient) are DIRECTIONAL sources:
+# each sits at a distinct position in space and propagates to the array
+# through delay-and-attenuation, creating spatially-correlated signals.
+# Ambient is diffuse (per-channel pink noise).
+#
+# Guidelines:
+#   coeff ≤ 0.05  → usable with 5 dB threshold
+#   coeff = 0.10  → severe cancellation, detection collapses
+#   tilt  = 0     → boresight level (horizontal)
+#   tilt  = 15-30 → tilted upward, changes multipath geometry
+#   wind_direction_deg → 0=front, 90=right
+#   traffic_direction_deg → azimuth of road from array
+environment:
+  enabled: false
+  ground:
+    height_m: 5.0
+    tilt_deg: 0.0
+    reflection_coefficient: 0.5
+  noise:
+    wind_speed_ms: 0.0
+    wind_direction_deg: 0.0
+    traffic_density: "none"
+    traffic_direction_deg: 90.0
+    bird_activity: 0.0
+    ambient_db: 0.0
+
+output:
+  animation_fps: 15
+  save_animation: true
+  save_3d_animation: true
+  save_figures: true
+  save_data: true

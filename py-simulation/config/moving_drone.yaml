@@ -1,0 +1,75 @@
+array:
+  ring1_radius: 0.34       # meters
+  ring2_radius: 0.17       # meters
+  n_mics_ring1: 8
+  n_mics_ring2: 8
+  ring_spacing: 0.20       # meters between rings
+
+signal:
+  fs: 22050                # sampling rate (Hz)
+  duration: 15.0            # seconds
+  drone_spl_db: 70         # drone SPL at 1 m (EIN-based SNR)
+  # snr_db: 20             # optional manual override
+
+mic:
+  snr_dba: 65              # ICS-52000: 65 dBA (94 dB SPL reference)
+  sensitivity_dbFS: -26.0
+  aop_db_spl: 120.0
+
+drone:
+  rpm: 6000                # rotor RPM
+  num_blades: 2            # blades per rotor
+  num_rotors: 4            # number of rotors
+  distance: 10.0           # meters from array center (reference)
+  initial_bearing:
+    azimuth_deg: 0.0       # degrees from boresight
+    elevation_deg: 30.0    # degrees from boresight (reference)
+  trajectory:
+    type: flyby
+    closest_distance: 5.0      # closest approach distance (m)
+    closest_azimuth_deg: 0.0   # direction of closest approach
+    closest_elevation_deg: 30.0
+    speed: 8.0                 # m/s along the flight path (28.8 km/h)
+    total_duration: 15.0       # total simulation time (s)
+
+srpphat:
+  fft_size: 2048
+  hop_length: 512
+  search:
+    azimuth_range: [-60.0, 60.0]
+    elevation_range: [-60.0, 60.0]
+    resolution_deg: 2.0    # degrees per grid step
+  max_freq: 4000.0         # max frequency for SRP (Hz)
+  mode: "phat"             # "phat" or "standard"
+  frequency_weight: 0.0    # 0=flat, 0.5=sqrt, 1=linear, 2=quadratic
+  detection:
+    enabled: true
+    method: peak_to_mean
+    peak_to_mean_threshold_db: 5.0
+
+# ── Environment Simulation ──────────────────────────────────────────────
+# Per-mic thermal noise is derived from mic EIN (94 - snr_dba = 29 dBA)
+# and drone SPL at distance. Set signal.snr_db to override EIN computation.
+#
+# Noise types (wind, traffic, birds, ambient) are DIRECTIONAL sources.
+# Ambient is diffuse (per-channel pink noise).
+environment:
+  enabled: false
+  ground:
+    height_m: 5.0
+    tilt_deg: 0.0
+    reflection_coefficient: 0.5
+  noise:
+    wind_speed_ms: 0.0
+    wind_direction_deg: 0.0
+    traffic_density: "none"
+    traffic_direction_deg: 90.0
+    bird_activity: 0.0
+    ambient_db: 0.0
+
+output:
+  animation_fps: 15
+  save_animation: true
+  save_3d_animation: true
+  save_figures: true
+  save_data: true

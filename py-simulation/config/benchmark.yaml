@@ -1,0 +1,64 @@
+# ── Benchmark Config ────────────────────────────────────────────────────
+# Minimal, fast simulation for iteration and regression testing.
+# Stationary drone, coarse resolution, short duration, no animation.
+#
+# Use: uv run python -m src.main --config config/benchmark.yaml
+#   or: uv run python -m src.main --config config/default.yaml --quick
+
+array:
+  ring1_radius: 0.34
+  ring2_radius: 0.17
+  n_mics_ring1: 8
+  n_mics_ring2: 8
+  ring_spacing: 0.20
+
+signal:
+  fs: 48000
+  duration: 2.0            # 2 seconds → ~140 frames at hop=512
+  snr_db: 25
+
+drone:
+  rpm: 6000
+  num_blades: 2
+  num_rotors: 4
+  distance: 10.0           # reference distance
+  initial_bearing:
+    azimuth_deg: 0.0
+    elevation_deg: 30.0
+  motion:
+    enabled: false         # stationary — uses FFT-based delays (fast)
+  trajectory: {}           # no trajectory, stays at initial position
+
+srpphat:
+  fft_size: 2048
+  hop_length: 512
+  search:
+    azimuth_range: [-60.0, 60.0]
+    elevation_range: [-60.0, 60.0]
+    resolution_deg: 4.0    # 4° → 31×31 = 961 directions vs 61×61 = 3721
+  max_freq: 2000.0         # fewer frequency bins → less phase tensor memory
+  mode: "phat"
+  frequency_weight: 0.0
+  detection:
+    enabled: true
+    method: peak_to_mean
+    peak_to_mean_threshold_db: 5.0
+
+environment:
+  enabled: false
+  ground:
+    height_m: 5.0
+    tilt_deg: 0.0
+    reflection_coefficient: 0.5
+  noise:
+    wind_speed_ms: 0.0
+    traffic_density: "none"
+    bird_activity: 0.0
+    ambient_db: 0.0
+
+output:
+  animation_fps: 15
+  save_animation: false
+  save_3d_animation: false
+  save_figures: false
+  save_data: true

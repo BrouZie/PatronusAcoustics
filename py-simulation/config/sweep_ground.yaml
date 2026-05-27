@@ -1,0 +1,9 @@
+# Sweep: ground reflection parameters
+# Base: noisy_oscillating (oscillating trajectory, EIN-based SNR, directional noise)
+# Goal: Find the ground-reflectivity cliff — where does P2M drop below threshold?
+# Expected: det ~95% at coeff=0, drops sharply around coeff=0.03-0.05
+base_config: config/noisy_oscillating.yaml
+sweep:
+  ground.reflection_coefficient: [0.0, 0.02, 0.03, 0.05, 0.08]
+  ground.tilt_deg: [0, 15, 30]
+output: results/sweep_ground.csv

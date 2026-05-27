@@ -1,0 +1,32 @@
+# Sweep: array geometry under realistic conditions
+# Base: default.yaml — override to enable environment + oscillation
+# Goal: Find minimum viable array for 80%+ detection
+# Vary: ring aperture and microphone count
+# Note: ring2 is kept at default (0.17m, 8 mics) for all combos
+base_config: config/default.yaml
+overrides:
+  environment:
+    enabled: true
+    ground:
+      height_m: 5.0
+      tilt_deg: 15.0
+      reflection_coefficient: 0.05
+    noise:
+      wind_speed_ms: 1.5
+      wind_direction_deg: 0.0
+      traffic_density: "none"
+      bird_activity: 0.05
+      ambient_db: 10.0
+  drone:
+    trajectory:
+      type: oscillating
+      closest_distance: 7.0
+      closest_azimuth_deg: 0.0
+      closest_elevation_deg: 30.0
+      cross_range: 14.0
+      period: 12.0
+    distance: 30.0
+sweep:
+  array.ring1_radius: [0.17, 0.25, 0.34, 0.50]
+  array.n_mics_ring1: [4, 8, 16]
+output: results/sweep_array.csv

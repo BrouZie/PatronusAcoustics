@@ -1,0 +1,14 @@
+[project]
+name = "patronus-sim"
+version = "0.1.0"
+description = "Dual-ring microphone array SRP-PHAT beamforming simulation"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+patronus = "src.main:main"
