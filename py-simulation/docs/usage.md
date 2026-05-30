@@ -3,13 +3,13 @@
 ## Quick Start
 
 ```bash
-# Basic simulation
-python -m src.main -c config/noisy_oscillating.yaml
+# Default realistic simulation (15s, environment, oscillating drone)
+python -m src.main
 
-# Fast iteration (4s, coarse grid, no animation)
-python -m src.main -c config/noisy_oscillating.yaml --quick --no-animation
+# Fast iteration (4s, coarse grid, 2 kHz, no output files)
+python -m src.main -c config/quick.yaml
 
-# Benchmark / regression test
+# Benchmark / regression test (2s, stationary, no environment)
 python -m src.main -c config/benchmark.yaml
 
 # Profile (top-20 cumtime)
@@ -26,7 +26,7 @@ python -m src.main -c config/benchmark.yaml --profile
 | `--snr` | Override SNR (dB) |
 | `--duration` | Override simulation duration (s) |
 | `--azimuth, --elevation` | Override drone initial bearing |
-| `--quick` | 4s, 4° resolution, 2 kHz max freq, no animation |
+| `--quick` | 4s, 4° resolution, 2 kHz max freq, no output files (same as `-c config/quick.yaml`) |
 | `--no-animation` | Skip animation rendering |
 | `--no-figures` | Skip summary figures |
 | `--interactive` | Show interactive figure after saving |
@@ -38,13 +38,14 @@ python -m src.main -c config/benchmark.yaml --profile
 
 ```bash
 # Run a sweep
-python -m src.sweep config/sweep_ground.yaml
+python -m src.sweep config/sweep/ground.yaml
 
 # Preview combinations without running
-python -m src.sweep config/sweep_ground.yaml --dry-run
+python -m src.sweep config/sweep/ground.yaml --dry-run
 ```
 
-Sweep configs live in `config/sweep_*.yaml`. See [config.md](config.md) for the YAML format.
+Sweep configs live in `config/sweep/*.yaml`. Each references `config/default.yaml` as its base.
+See [config.md](config.md) for the YAML format.
 
 ## Output Structure
 
@@ -68,19 +69,22 @@ Sweep results go to `results/` as CSV files.
 
 | Command | Scenario | Duration | Time (C++) |
 |---|---|---|---|---|
-| `-c config/benchmark.yaml` | 2s stationary, SNR=25, 4°, 2 kHz | ~0.3s | ~0.3s |
-| `-c config/default.yaml` | 15s arc, no environment | ~2s | ~0.4s |
-| `-c config/noisy_oscillating.yaml` | 15s oscillating + environment | ~6s | **~23.6s** |
-| `-c config/prototype.yaml` | 10s oscillating + light traffic | ~4s | ~4s |
-| `-c config/oscillating_drone.yaml` | 15s oscillating, no environment | ~2s | ~0.4s |
-| `-c config/moving_drone.yaml` | 15s flyby, no environment | ~2s | ~0.4s |
-| `-c config/16_prototype.yaml` | 10s, 32 mics, environment | ~10s | ~10s |
+| *(none — loads `config/default.yaml`)* | 15s oscillating + environment (ICS-52000) | 15s | **~23.6s** |
+| `-c config/quick.yaml` | 4s, 4° grid, 2 kHz, no output | 4s | ~2s |
+| `-c config/benchmark.yaml` | 2s stationary, SNR=25, 4°, 2 kHz | 2s | ~0.3s |
+
+| Sweep config | Parameters swept |
+|---|---|
+| `config/sweep/ground.yaml` | Ground reflection coefficient, array tilt |
+| `config/sweep/distance.yaml` | Closest trajectory distance, wind speed |
+| `config/sweep/array.yaml` | Ring1 radius, mic count on ring1 |
+| `config/sweep/atmospheric.yaml` | Humidity, source distance |
+| `config/sweep/detection_range.yaml` | Source distance (10–500m) |
 
 > Timings on **12th Gen i7-1255U** (Alder Lake, 10c/12t). C++ acceleration active (`make build`).
 > 
-> `noisy_oscillating` is the heaviest default config: 2° grid (3721 directions), 4 kHz max freq (171 bins), 1403 frames.
-> Breakdown: SRP beamforming 11.5s (8.2ms/frame) + wind noise 4.6s + bird noise 2.0s + ambient 0.5s + propagation 2.0s + misc 3.0s.
-> Without C++ (`_srp`, `_noise`, `_propagate`), expect 2–3× slower.
+> Default breakdown: SRP beamforming 11.5s (8.2ms/frame) + wind noise 4.6s + bird noise 2.0s + ambient 0.5s + propagation 2.0s + misc 3.0s.
+> Without C++ extensions, expect 2–3× slower.
 
 ## Dependencies
 

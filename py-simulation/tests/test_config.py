@@ -51,7 +51,7 @@ class TestSignalConfig(unittest.TestCase):
     def test_drone_spl_changes_snr(self):
         cfg = Config.from_yaml(str(CONFIG_DIR / "default.yaml"))
         self.assertIsNone(cfg.signal.snr_db)
-        self.assertEqual(cfg.signal.drone_spl_db, 70.0)
+        self.assertEqual(cfg.signal.drone_spl_db, 73.0)
 
     def test_mic_config_defaults(self):
         cfg = Config.from_yaml(str(CONFIG_DIR / "default.yaml"))

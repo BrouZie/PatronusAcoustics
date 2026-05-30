@@ -1,0 +1,12 @@
+# Quick iteration preset — fast turnaround for development.
+# Overrides default.yaml: short duration, coarse grid, no output files.
+signal:
+  duration: 4.0
+srpphat:
+  search:
+    resolution_deg: 4.0
+  max_freq: 2000.0
+output:
+  save_animation: false
+  save_3d_animation: false
+  save_figures: false

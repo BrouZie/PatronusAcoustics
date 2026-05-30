@@ -1,9 +1,0 @@
-# Sweep: detection range under realistic noise
-# Base: noisy_oscillating
-# Goal: Find the maximum reliable detection range with environmental noise
-# Vary: closest distance of oscillating trajectory, wind speed
-# Expected: detection degrades with distance; wind adds marginal impact
-base_config: config/noisy_oscillating.yaml
-sweep:
-  drone.trajectory.closest_distance: [5, 7, 10, 15, 20, 30]
-  noise.wind_speed_ms: [0, 2]

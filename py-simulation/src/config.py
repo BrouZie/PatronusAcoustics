@@ -86,6 +86,7 @@ class ArrayConfig:
 
 @dataclass
 class MicConfig:
+    model: str = "ics-52000"
     snr_dba: float = 65.0
     sensitivity_dbFS: float = -26.0
     aop_db_spl: float = 120.0
