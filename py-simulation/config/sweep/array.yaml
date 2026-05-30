@@ -1,0 +1,8 @@
+# Sweep: array geometry under realistic conditions
+base_config: config/default.yaml
+sweep:
+  array.ring1_radius: [0.17, 0.25, 0.34, 0.50]
+  array.n_mics_ring1: [4, 8, 16]
+overrides:
+  environment.ground.tilt_deg: 15.0
+  environment.ground.reflection_coefficient: 0.05

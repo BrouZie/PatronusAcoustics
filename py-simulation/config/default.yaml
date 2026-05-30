@@ -1,76 +1,79 @@
+# Default configuration — ICS-52000 dual-ring array with full environmental realism.
+# All other configs are thin overrides of this file.
+# See docs/usage.md for CLI flags and sweep runner.
+
 array:
-  ring1_radius: 0.34       # meters
-  ring2_radius: 0.17       # meters
+  ring1_radius: 0.34
+  ring2_radius: 0.17
   n_mics_ring1: 8
   n_mics_ring2: 8
-  ring_spacing: 0.20       # meters between rings
-
-signal:
-  fs: 48000                # sampling rate (Hz)
-  duration: 15.0            # seconds
-  drone_spl_db: 70         # drone SPL at 1 m (for EIN-based SNR)
-  # snr_db: 25             # optional manual override (EIN-derived if omitted)
+  ring_spacing: 0.20
 
 mic:
-  snr_dba: 65              # ICS-52000: 65 dBA (94 dB SPL reference)
-  sensitivity_dbFS: -26.0  # dBFS at 94 dB SPL, 1 kHz
-  aop_db_spl: 120.0        # Acoustic Overload Point (dB SPL)
+  model: ics-52000
+  snr_dba: 65
+  sensitivity_dbFS: -26.0
+  aop_db_spl: 120.0
+
+signal:
+  fs: 48000
+  duration: 15.0
+  drone_spl_db: 73
 
 drone:
-  rpm: 6000                # rotor RPM
-  num_blades: 2            # blades per rotor
-  num_rotors: 4            # number of rotors
-  distance: 10.0           # meters from array center (reference)
-  bpf_harmonics: 6         # number of blade-passage harmonics to model
+  rpm: 6000
+  num_blades: 2
+  num_rotors: 4
+  distance: 30.0
+  bpf_harmonics: 6
   initial_bearing:
-    azimuth_deg: 0.0       # degrees from boresight
-    elevation_deg: 30.0    # degrees from boresight (reference for arc plane)
+    azimuth_deg: 0.0
+    elevation_deg: 30.0
   trajectory:
-    type: arc
-    radius: 15.0           # constant distance from array (m)
-    elevation_deg: 25.0    # elevation angle from boresight
-    azimuth_start_deg: -50.0  # sweep start (deg)
-    azimuth_end_deg: 50.0     # sweep end (deg)
-    speed: 1.75            # m/s along the arc (~6.3 km/h)
+    type: oscillating
+    closest_distance: 7.0
+    closest_azimuth_deg: 0.0
+    closest_elevation_deg: 30.0
+    cross_range: 14.0
+    period: 12.0
 
 srpphat:
   fft_size: 2048
   hop_length: 512
+  max_freq: 4000.0
+  mode: "phat"
+  frequency_weight: 0.0
   search:
     azimuth_range: [-60.0, 60.0]
     elevation_range: [-60.0, 60.0]
-    resolution_deg: 2.0    # degrees per grid step
-  max_freq: 4000.0         # max frequency for SRP (Hz)
-  mode: "phat"             # "phat" or "standard"
-  frequency_weight: 0.0    # 0=flat, 0.5=sqrt, 1=linear, 2=quadratic emphasis on high freqs
+    resolution_deg: 2.0
   detection:
     enabled: true
     method: peak_to_mean
     peak_to_mean_threshold_db: 5.0
 
-# ── Environment Simulation ──────────────────────────────────────────────
 environment:
-  enabled: false
+  enabled: true
   ground:
     height_m: 5.0
-    tilt_deg: 0.0
-    reflection_coefficient: 0.5
-    model: constant            # "constant" or "delany_bazley"
-    flow_resistivity: 200000.0  # Pa·s/m² (grass=200k, asphalt=20M, snow=30k)
+    tilt_deg: 15.0
+    reflection_coefficient: 0.03
+    model: constant
+    flow_resistivity: 200000.0
   noise:
-    wind_speed_ms: 0.0
+    wind_speed_ms: 1.5
     wind_direction_deg: 0.0
     traffic_density: "none"
     traffic_direction_deg: 90.0
-    bird_activity: 0.0
-    ambient_db: 0.0
+    bird_activity: 0.10
+    ambient_db: 10.0
   atmospheric:
-    temperature_C: 20.0       # degrees Celsius
-    humidity_pct: 50.0        # relative humidity (%)
-    pressure_kPa: 101.325     # atmospheric pressure (kPa)
+    temperature_C: 20.0
+    humidity_pct: 50.0
+    pressure_kPa: 101.325
   refraction:
     enabled: false
-    wind_shear_ms_per_m: 0.0
+    wind_shear_ms_per_m: 0.1
     temperature_lapse_rate: -0.0065
     roughness_length: 0.03
   turbulence:

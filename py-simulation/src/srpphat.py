@@ -4,6 +4,12 @@ from scipy.signal import get_window
 from .geometry import DualRingArray
 from .metrics import peak_to_sidelobe_ratio
 
+try:
+    from . import _srp
+    _HAS_CPP_SRP = True
+except ImportError:
+    _HAS_CPP_SRP = False
+
 
 class SRPPhatProcessor:
     def __init__(self, array: DualRingArray, fs: int, fft_size: int,
@@ -75,10 +81,12 @@ class SRPPhatProcessor:
         else:
             X_used = X
 
-        # Vectorized SRP — replaces per-frequency Python loop with einsum
-        # beam[f, d] = Σ_m X_used[m, f] * phase[f, m, d]
-        beam = np.einsum("mf,fmd->fd", X_used, self.phase, optimize=True)
-        srp = np.einsum("fd,f->d", np.abs(beam) ** 2, self.freq_weight, optimize=True)
+        if _HAS_CPP_SRP:
+            srp = np.empty(self.n_directions)
+            _srp.compute_srp_beam(X_used, self.phase, self.freq_weight, srp)
+        else:
+            beam = np.einsum("mf,fmd->fd", X_used, self.phase, optimize=True)
+            srp = np.einsum("fd,f->d", np.abs(beam) ** 2, self.freq_weight, optimize=True)
 
         srp_map = srp.reshape(self.n_az, self.n_el)
         peak_idx = np.argmax(srp)

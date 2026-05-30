@@ -20,7 +20,7 @@ python -m src.sweep config/sweep_ground.yaml
 python -m src.sweep config/sweep_ground.yaml --dry-run
 ```
 
-Results go to `results/sweep_ground.csv` (or as configured in the YAML). Each row contains the swept parameter values plus detection_rate, mean/max angular error, PSR, beamwidth, and wall-clock time.
+Results go to `results/{sweep_name}_{timestamp}/sweep_results.csv` by default (override with the optional `output:` key in the YAML). Each row contains the swept parameter values plus detection_rate, mean/max angular error, PSR, beamwidth, effective SNR, and wall-clock time.
 
 ## Experiment Ideas
 

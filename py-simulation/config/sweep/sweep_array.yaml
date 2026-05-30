@@ -29,4 +29,3 @@ overrides:
 sweep:
   array.ring1_radius: [0.17, 0.25, 0.34, 0.50]
   array.n_mics_ring1: [4, 8, 16]
-output: results/sweep_array.csv

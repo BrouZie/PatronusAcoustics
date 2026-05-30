@@ -3,6 +3,13 @@ from scipy.signal import butter, lfilter, sosfilt
 
 from .trajectory import make_trajectory
 
+# Attempt to load C++ accelerated propagation routines
+try:
+    from . import _propagate
+    _HAS_CPP = True
+except ImportError:
+    _HAS_CPP = False
+
 
 class DroneSource:
     def __init__(self, config, absorption=None, refraction=None,
@@ -206,16 +213,21 @@ class DroneSource:
                     self.mic_positions_world is not None)
                    else array.positions)
 
+        if _HAS_CPP:
+            return _propagate.propagate_moving(
+                source, mic_pos, positions, fs, self.speed_sound, turbulence
+            )
+
+        # Pure-Python fallback (no _cpp extension)
         result = np.zeros((n_mics, n))
         for i in range(min(n, len(positions))):
             pos = positions[i]
             dists = np.linalg.norm(mic_pos - pos, axis=1)
-            delays = dists / self.speed_sound
 
             for m in range(n_mics):
                 turb = turbulence[m, i] if turbulence is not None else 0.0
                 atten = 1.0 / (dists[m] + 1e-6)
-                delay_samp = (delays[m] + turb) * fs
+                delay_samp = (dists[m] / self.speed_sound + turb) * fs
                 idx_float = i - delay_samp
                 idx_int = int(np.floor(idx_float))
                 frac = idx_float - idx_int
@@ -230,15 +242,26 @@ class DroneSource:
         n = len(source)
         n_mics = array.n_mics
         mic_pos = self.mic_positions_world
-        result = np.zeros((n_mics, n))
+        R = self.ground_reflector.reflection_coefficient
 
+        if _HAS_CPP and self.ground_reflector.model == "constant":
+            # Pre-compute all image positions in one vectorized call
+            height = self.ground_reflector.height_m
+            image_positions = positions.copy()
+            image_positions[:, 2] = -(positions[:, 2] + 2 * height)
+
+            return _propagate.propagate_reflected_moving(
+                source, mic_pos, positions, image_positions,
+                fs, self.speed_sound, turbulence, R,
+            )
+
+        # Pure-Python fallback
+        result = np.zeros((n_mics, n))
         for i in range(min(n, len(positions))):
             pos = positions[i]
             image_pos = self.ground_reflector.get_image_source(pos)
             dists_direct = np.linalg.norm(mic_pos - pos, axis=1)
             dists_image = np.linalg.norm(mic_pos - image_pos, axis=1)
-
-            R = self.ground_reflector.reflection_coefficient
 
             for m in range(n_mics):
                 turb = turbulence[m, i] * 0.5 if turbulence is not None else 0.0
@@ -255,12 +278,6 @@ class DroneSource:
         return result
 
     def _apply_absorption_ola(self, mic_signals, fs, distances):
-        """Apply frequency-dependent absorption using overlap-add STFT.
-
-        Each mic signal is filtered by H_abs(f, d(t)) in the frequency
-        domain block-wise. Applied as a post-process after the per-sample
-        delay+attenuation propagation.
-        """
         if self.absorption is None:
             return mic_signals
 
@@ -269,23 +286,28 @@ class DroneSource:
         hop = block_size // 2
         window = np.hanning(block_size)
 
+        freqs = np.fft.rfftfreq(block_size, 1 / fs)
+        alpha = self.absorption.coefficient(freqs)
+
+        if _HAS_CPP:
+            return _propagate.apply_absorption_ola(
+                mic_signals, distances, fs, alpha,
+                block_size, hop, window
+            )
+
+        n_freq = len(freqs)
         output = np.zeros_like(mic_signals)
         overlap_cnt = np.zeros(n)
 
         for start in range(0, n - block_size + 1, hop):
             end = start + block_size
             center = start + block_size // 2
-
             d = distances[:, center]
 
-            S = np.fft.fft(mic_signals[:, start:end] * window[None, :])
-            freqs = np.fft.fftfreq(block_size, 1 / fs)
-
-            alpha = self.absorption.coefficient(np.abs(freqs))
+            S = np.fft.rfft(mic_signals[:, start:end] * window[None, :])
             H_abs = np.exp(-alpha[None, :] * d[:, None] / 8.686)
-
             S_abs = S * H_abs
-            out_block = np.fft.ifft(S_abs).real
+            out_block = np.fft.irfft(S_abs, n=block_size)
             output[:, start:end] += out_block
             overlap_cnt[start:end] += 1.0
 

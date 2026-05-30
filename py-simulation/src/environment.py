@@ -4,6 +4,12 @@ from scipy.signal import butter, sosfilt
 from .absorption import AtmosphericAbsorption
 from .refraction import RefractionModel
 
+try:
+    from . import _noise
+    _HAS_CPP_NOISE = True
+except ImportError:
+    _HAS_CPP_NOISE = False
+
 RHO0 = 1.2
 C0 = 343.0
 
@@ -121,46 +127,52 @@ class WindSource:
 
         # Spectral envelope: brown noise (1/f) with LPF at 500 Hz
         env = np.ones(n_pad, dtype=float)
-        for idx in pos_idx:
-            f = freqs[idx]
-            e = 1.0 / max(f, 1.0)
-            e /= np.sqrt(1.0 + (f / 500.0) ** 2)
-            env[idx] = e
+        f_pos = freqs[pos_idx]
+        env_pos = 1.0 / np.maximum(f_pos, 1.0)
+        env_pos /= np.sqrt(1.0 + (f_pos / 500.0) ** 2)
+        env[pos_idx] = env_pos
         env[freqs == 0] = env[pos_idx[0]]
-        neg_idx = np.where(freqs < 0)[0]
-        for idx in neg_idx:
+        for idx in np.where(freqs < 0)[0]:
             env[idx] = env[n_pad - idx]
 
         # Generate spectrum for each mic
         X_fft = np.zeros((n_mics, n_pad), dtype=complex)
 
-        # DC
+        # DC (real-valued)
         X_fft[:, 0] = np.random.randn(n_mics) * env[0]
 
-        # Nyquist
+        # Nyquist (real-valued, if even length)
         nyq = n_pad // 2
         if n_pad % 2 == 0:
             X_fft[:, nyq] = np.random.randn(n_mics) * env[nyq]
 
         U = max(self.speed_ms, 0.1)
 
-        # Positive frequencies: apply Corcos coherence
-        for idx in pos_idx:
-            f = freqs[idx]
-            Gamma = np.exp(-self.alpha * f * dists / U)
-            Gamma += 1e-8 * np.eye(n_mics)
-            try:
-                L = np.linalg.cholesky(Gamma)
-            except np.linalg.LinAlgError:
-                L = np.eye(n_mics)
-            Z = (np.random.randn(n_mics) + 1j * np.random.randn(n_mics)) / np.sqrt(2)
-            X_fft[:, idx] = L @ Z * env[idx]
+        if _HAS_CPP_NOISE:
+            _noise.generate_wind_frequencies(
+                np.ascontiguousarray(dists, dtype=np.float64),
+                np.ascontiguousarray(freqs, dtype=np.float64),
+                np.ascontiguousarray(env, dtype=np.float64),
+                np.ascontiguousarray(pos_idx, dtype=np.int64),
+                self.alpha, U, n_mics,
+                np.random.randint(0, 2**32, dtype=np.int64),
+                X_fft,
+            )
+        else:
+            for idx in pos_idx:
+                f = freqs[idx]
+                Gamma = np.exp(-self.alpha * f * dists / U)
+                Gamma += 1e-8 * np.eye(n_mics)
+                try:
+                    L = np.linalg.cholesky(Gamma)
+                except np.linalg.LinAlgError:
+                    L = np.eye(n_mics)
+                Z = (np.random.randn(n_mics) + 1j * np.random.randn(n_mics)) / np.sqrt(2)
+                X_fft[:, idx] = L @ Z * env[idx]
 
-        # Negative frequencies (conjugate symmetric)
-        for idx in pos_idx:
-            neg = n_pad - idx
-            if neg < n_pad:
-                X_fft[:, neg] = np.conj(X_fft[:, idx])
+        # Negative frequencies (conjugate symmetric) — vectorised numpy
+        neg_cols = (n_pad - pos_idx).astype(int)
+        X_fft[:, neg_cols] = np.conj(X_fft[:, pos_idx])
 
         result = np.fft.ifft(X_fft, axis=1).real[:, :n]
         gain = self.speed_ms * 0.008

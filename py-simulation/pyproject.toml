@@ -13,3 +13,9 @@ dependencies = [
 
 [project.scripts]
 patronus = "src.main:main"
+
+[dependency-groups]
+dev = [
+    "pybind11>=3.0.4",
+    "scikit-build-core>=0.12.2",
+]

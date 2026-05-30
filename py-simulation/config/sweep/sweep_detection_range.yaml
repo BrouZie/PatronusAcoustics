@@ -26,4 +26,3 @@ overrides:
   environment.atmospheric.humidity_pct: 50.0
   environment.refraction.enabled: false
   environment.turbulence.amplitude_scintillation: false
-output: results/sweep_detection_range.csv

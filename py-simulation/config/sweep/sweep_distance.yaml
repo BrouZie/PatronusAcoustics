@@ -7,4 +7,3 @@ base_config: config/noisy_oscillating.yaml
 sweep:
   drone.trajectory.closest_distance: [5, 7, 10, 15, 20, 30]
   noise.wind_speed_ms: [0, 2]
-output: results/sweep_distance.csv

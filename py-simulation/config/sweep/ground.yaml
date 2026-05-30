@@ -1,0 +1,5 @@
+# Sweep: ground reflection parameters
+base_config: config/default.yaml
+sweep:
+  ground.reflection_coefficient: [0.0, 0.02, 0.03, 0.05, 0.08]
+  ground.tilt_deg: [0, 15, 30]

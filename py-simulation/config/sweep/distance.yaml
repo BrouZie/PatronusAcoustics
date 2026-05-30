@@ -1,0 +1,5 @@
+# Sweep: detection range under environmental noise
+base_config: config/default.yaml
+sweep:
+  drone.trajectory.closest_distance: [5, 7, 10, 15, 20, 30]
+  noise.wind_speed_ms: [0, 2]

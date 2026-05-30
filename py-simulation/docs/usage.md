@@ -66,15 +66,21 @@ Sweep results go to `results/` as CSV files.
 
 ## Provided Config Files
 
-| Command | Scenario | Duration |
-|---|---|---|
-| `-c config/benchmark.yaml` | 2s stationary, SNR=25, 4°, 2 kHz | ~0.5s |
-| `-c config/default.yaml` | 15s arc, no environment | ~30s |
-| `-c config/noisy_oscillating.yaml` | 15s oscillating + environment | ~30s |
-| `-c config/prototype.yaml` | 10s oscillating + light traffic | ~20s |
-| `-c config/oscillating_drone.yaml` | 15s oscillating, no environment | ~30s |
-| `-c config/moving_drone.yaml` | 15s flyby, no environment | ~30s |
-| `-c config/16_prototype.yaml` | 10s, 32 mics, environment | ~40s |
+| Command | Scenario | Duration | Time (C++) |
+|---|---|---|---|---|
+| `-c config/benchmark.yaml` | 2s stationary, SNR=25, 4°, 2 kHz | ~0.3s | ~0.3s |
+| `-c config/default.yaml` | 15s arc, no environment | ~2s | ~0.4s |
+| `-c config/noisy_oscillating.yaml` | 15s oscillating + environment | ~6s | **~23.6s** |
+| `-c config/prototype.yaml` | 10s oscillating + light traffic | ~4s | ~4s |
+| `-c config/oscillating_drone.yaml` | 15s oscillating, no environment | ~2s | ~0.4s |
+| `-c config/moving_drone.yaml` | 15s flyby, no environment | ~2s | ~0.4s |
+| `-c config/16_prototype.yaml` | 10s, 32 mics, environment | ~10s | ~10s |
+
+> Timings on **12th Gen i7-1255U** (Alder Lake, 10c/12t). C++ acceleration active (`make build`).
+> 
+> `noisy_oscillating` is the heaviest default config: 2° grid (3721 directions), 4 kHz max freq (171 bins), 1403 frames.
+> Breakdown: SRP beamforming 11.5s (8.2ms/frame) + wind noise 4.6s + bird noise 2.0s + ambient 0.5s + propagation 2.0s + misc 3.0s.
+> Without C++ (`_srp`, `_noise`, `_propagate`), expect 2–3× slower.
 
 ## Dependencies
 
@@ -84,3 +90,31 @@ Python >= 3.10
 ```
 
 Install: `pip install -e .` (from `pyproject.toml`) or use the provided `uv.lock`.
+
+### C++ Acceleration (optional, recommended)
+
+Build the C++ extensions for 2×–10× speedup:
+
+```bash
+make build
+```
+
+Requires:
+- **pybind11** (installed via pip, in `pyproject.toml`)
+- **FFTW3** (system library):
+
+  | OS | Install |
+  |---|---|
+  | Debian/Ubuntu | `sudo apt install libfftw3-dev` |
+  | Arch | `sudo pacman -S fftw` |
+  | Fedora | `sudo dnf install fftw-devel` |
+  | macOS | `brew install fftw` |
+
+Three modules are built:
+| Module | Path | Accelerates |
+|---|---|---|
+| `_propagate.so` | `src/cpp/propagate.cpp` | Per-sample delay+attenuation + absorption OLA |
+| `_noise.so` | `src/cpp/noise.cpp` | Wind noise Corcos frequency loop |
+| `_srp.so` | `src/cpp/srp.cpp` | SRP-PHAT beamforming (einsum hot path) |
+
+Each falls back to pure Python automatically if the `.so` is missing.

@@ -1,22 +1,31 @@
 """
 Parameter sweep runner — runs simulations over a Cartesian product of config
-values and writes per-run aggregate metrics to a CSV.
+values using parallel workers, writes incremental results to CSV, and supports
+checkpoint/resume.
 
 Usage:
-    python -m src.sweep config/sweep_ground.yaml
-    python -m src.sweep config/sweep_ground.yaml --dry-run
+    python -m src.sweep config/sweep/detection_range.yaml
+    python -m src.sweep config/sweep/detection_range.yaml --dry-run
+    python -m src.sweep config/sweep/detection_range.yaml --workers 8
+    python -m src.sweep config/sweep/detection_range.yaml --resume
 """
 
 import argparse
 import copy
-import csv
+import hashlib
 import io
 import itertools
+import json
+import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 
+import csv
+import numpy as np
 import yaml
 
 from .config import Config, deep_merge, parse_dotted_key
@@ -28,11 +37,16 @@ METRIC_FIELDS = [
     "mean_angular_error_deg",
     "std_angular_error_deg",
     "max_angular_error_deg",
+    "min_angular_error_deg",
     "mean_psr_db",
+    "std_psr_db",
     "mean_beamwidth_deg",
     "n_detected",
     "n_total",
+    "n_frames",
+    "effective_snr_db",
     "run_time_s",
+    "config_hash",
 ]
 
 
@@ -55,15 +69,79 @@ def parse_sweep_config(path):
         sys.exit("Error: sweep config must include 'sweep' key with parameters")
 
     overrides = data.get("overrides", {}) or {}
-    output = data.get("output", str(_make_results_dir() / "sweep_results.csv"))
+    output_raw = data.get("output")  # None → auto-generate timestamped path
 
-    return base_config, params, overrides, output
+    return base_config, params, overrides, output_raw
 
 
 def _fmt(v):
     if isinstance(v, float):
         return f"{v:.4g}"
     return str(v)
+
+
+def _config_hash(config):
+    d = config.to_dict()
+    raw = json.dumps(d, sort_keys=True, default=str).encode()
+    return hashlib.sha256(raw).hexdigest()[:12]
+
+
+def _run_combo(keys, combo, base_dict, overrides):
+    """Execute a single sweep combination (runs in worker process)."""
+    try:
+        combo_nested = {}
+        for k, v in zip(keys, combo):
+            deep_merge(combo_nested, parse_dotted_key(k, v))
+
+        d = copy.deepcopy(base_dict)
+        deep_merge(d, overrides)
+        deep_merge(d, combo_nested)
+        config = Config.from_dict(d)
+
+        h = _config_hash(config)
+
+        t0 = time.time()
+        with redirect_stdout(io.StringIO()):
+            results = run_simulation(config, run_dir=None, profile=False)
+        elapsed = time.time() - t0
+        metrics = results["metrics"]
+
+        row = dict(zip(keys, combo))
+        row["config_hash"] = h
+        row["detection_rate"] = metrics.detection_rate
+        row["mean_angular_error_deg"] = metrics.mean_angular_error_deg
+        row["std_angular_error_deg"] = metrics.std_angular_error_deg
+        row["max_angular_error_deg"] = metrics.max_angular_error_deg
+        row["mean_psr_db"] = metrics.mean_psr_db
+        row["mean_beamwidth_deg"] = metrics.mean_beamwidth_deg
+        row["n_detected"] = metrics.n_detected
+        row["n_total"] = metrics.n_total
+        row["run_time_s"] = round(elapsed, 3)
+
+        # Extra metrics
+        n_frames = results.get("n_frames", 0)
+        row["n_frames"] = n_frames
+        frame_snrs = results.get("frame_snrs", None)
+        if frame_snrs is not None and len(frame_snrs) > 0:
+            row["effective_snr_db"] = round(float(frame_snrs[0]), 2)
+        else:
+            row["effective_snr_db"] = None
+
+        if len(metrics.angular_errors_deg) > 0:
+            valid = metrics.angular_errors_deg[~np.isnan(metrics.angular_errors_deg)]
+            row["min_angular_error_deg"] = float(np.min(valid)) if len(valid) > 0 else None
+        else:
+            row["min_angular_error_deg"] = None
+
+        if len(metrics.peak_to_sidelobe_ratios_db) > 0:
+            row["std_psr_db"] = float(np.std(metrics.peak_to_sidelobe_ratios_db))
+        else:
+            row["std_psr_db"] = None
+
+        return row
+    except Exception as e:
+        import traceback
+        return {"_error": str(e), "_traceback": traceback.format_exc(), "_combo": combo}
 
 
 def main(argv=None):
@@ -73,9 +151,25 @@ def main(argv=None):
         "--dry-run", action="store_true",
         help="Print parameter combinations without running",
     )
+    parser.add_argument(
+        "--workers", type=int, default=None,
+        help="Number of parallel worker processes (default: CPU count)",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Resume from last checkpoint (skips completed combinations)",
+    )
     args = parser.parse_args(argv)
 
-    base_path, params, overrides, output_path = parse_sweep_config(args.config)
+    base_path, params, overrides, output_raw = parse_sweep_config(args.config)
+
+    if output_raw is not None:
+        output_path = output_raw
+    else:
+        stem = Path(args.config).stem
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = _make_results_dir() / f"{stem}_{ts}"
+        output_path = str(out_dir / "sweep_results.csv")
 
     param_items = list(params.items())
     keys = [item[0] for item in param_items]
@@ -99,57 +193,121 @@ def main(argv=None):
     with open(base_path) as f:
         base_dict = yaml.safe_load(f)
 
-    rows = []
-    for i, combo in enumerate(combos):
+    # Load checkpoint state for resume
+    state_path = Path(output_path + ".state.json")
+    completed_hashes = set()
+    if args.resume and state_path.exists():
+        with open(state_path) as f:
+            state = json.load(f)
+        completed_hashes = {entry["hash"] for entry in state.get("completed", [])}
+        print(f"Resume: {len(completed_hashes)} already completed, {n - len(completed_hashes)} remaining")
+    elif args.resume:
+        print("Resume: no checkpoint found, starting fresh")
+
+    # Pre-compute hashes for all combos to check which are completed
+    pending = []
+    skipped = 0
+    for combo in combos:
         combo_nested = {}
         for k, v in zip(keys, combo):
             deep_merge(combo_nested, parse_dotted_key(k, v))
-
         d = copy.deepcopy(base_dict)
         deep_merge(d, overrides)
         deep_merge(d, combo_nested)
         config = Config.from_dict(d)
+        h = _config_hash(config)
+        if h in completed_hashes:
+            skipped += 1
+            continue
+        pending.append(combo)
 
-        tags = ", ".join(f"{k}={_fmt(v)}" for k, v in zip(keys, combo))
-        print(f"[{i+1}/{n}] {tags} ...", end=" ", flush=True)
+    if skipped:
+        print(f"Skipping {skipped} already-completed combinations")
 
-        t0 = time.time()
-        try:
-            with redirect_stdout(io.StringIO()):
-                results = run_simulation(config, run_dir=None, profile=False)
-            elapsed = time.time() - t0
-            metrics = results["metrics"]
+    if not pending:
+        print("All combinations already completed!")
+        return 0
 
-            row = dict(zip(keys, combo))
-            row["detection_rate"] = metrics.detection_rate
-            row["mean_angular_error_deg"] = metrics.mean_angular_error_deg
-            row["std_angular_error_deg"] = metrics.std_angular_error_deg
-            row["max_angular_error_deg"] = metrics.max_angular_error_deg
-            row["mean_psr_db"] = metrics.mean_psr_db
-            row["mean_beamwidth_deg"] = metrics.mean_beamwidth_deg
-            row["n_detected"] = metrics.n_detected
-            row["n_total"] = metrics.n_total
-            row["run_time_s"] = round(elapsed, 3)
+    # Prepare output CSV and state file
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
-            rows.append(row)
-            det_str = f"{metrics.detection_rate:.0%}" if not (metrics.n_total == 0) else "N/A"
-            print(f"det={det_str}  err={metrics.mean_angular_error_deg:.1f}°  {elapsed:.1f}s")
-        except Exception as e:
-            print(f"FAILED: {e}")
-            import traceback
-            traceback.print_exc()
+    fieldnames = list(keys) + METRIC_FIELDS
+    is_new = not out.exists()
 
-    if rows:
-        fieldnames = list(keys) + METRIC_FIELDS
-        out = Path(output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
+    # If new or not resuming, write header
+    if is_new or not args.resume:
         with open(out, "w", newline="") as f:
+            import csv
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(rows)
-        print(f"\nResults → {out.resolve()}")
+    else:
+        # Append mode — no header
+        pass
 
-    print(f"\n=== Sweep Complete: {len(rows)}/{n} successful ===")
+    # Initialize state
+    if args.resume and state_path.exists():
+        with open(state_path) as f:
+            state = json.load(f)
+    else:
+        state = {
+            "sweep_config": str(Path(args.config).resolve()),
+            "started": datetime.now(timezone.utc).isoformat(),
+            "output_path": str(out.resolve()),
+            "completed": [],
+        }
+
+    num_workers = args.workers or os.cpu_count() or 1
+    num_workers = min(num_workers, len(pending))
+    if num_workers < 1:
+        num_workers = 1
+
+    print(f"Using {num_workers} worker(s)")
+
+    total_pending = len(pending)
+    results = []
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {}
+        for combo in pending:
+            future = executor.submit(_run_combo, keys, combo, copy.deepcopy(base_dict), overrides)
+            futures[future] = combo
+
+        done_count = 0
+        for future in as_completed(futures):
+            combo = futures[future]
+            done_count += 1
+            try:
+                row = future.result(timeout=7200)
+            except Exception as e:
+                row = {"_error": str(e), "_combo": combo}
+
+            if "_error" in row:
+                tags = ", ".join(f"{k}={_fmt(v)}" for k, v in zip(keys, combo))
+                print(f"[{done_count}/{total_pending}] FAILED {tags}: {row['_error']}")
+                continue
+
+            tags = ", ".join(f"{k}={_fmt(v)}" for k, v in row.items() if k in keys)
+            det_str = f"{row['detection_rate']:.0%}" if row.get('n_total', 0) > 0 else "N/A"
+            err_str = f"{row.get('mean_angular_error_deg', 0):.1f}°" if row.get('mean_angular_error_deg') is not None else "N/A"
+            print(f"[{done_count}/{total_pending}] {tags}  det={det_str}  err={err_str}  {row.get('run_time_s', 0):.1f}s")
+
+            # Append row to CSV
+            with open(out, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writerow({k: row.get(k) for k in fieldnames})
+
+            # Update state
+            h = row.get("config_hash", "")
+            combo_values = [row.get(k) for k in keys]
+            state["completed"].append({"combo": combo_values, "hash": h, "status": "ok"})
+            with open(state_path, "w") as f:
+                json.dump(state, f, indent=2)
+
+            results.append(row)
+
+    print(f"\nResults → {out.resolve()}")
+    print(f"\n=== Sweep Complete: {len(results)}/{total_pending} successful ===")
     return 0
 
 

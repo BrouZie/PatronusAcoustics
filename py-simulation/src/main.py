@@ -108,6 +108,10 @@ def parse_args(argv=None):
         "--profile", action="store_true",
         help="Run with cProfile and print top-20 time stats",
     )
+    parser.add_argument(
+        "--dump-schema", action="store_true",
+        help="Print configuration schema with descriptions and defaults, then exit",
+    )
     return parser.parse_args(argv)
 
 
@@ -193,6 +197,10 @@ def run_simulation(config, run_dir=None, profile=False):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.dump_schema:
+        print(Config.schema())
+        return 0
+
     config_path = Path(args.config)
 
     if not config_path.exists():
