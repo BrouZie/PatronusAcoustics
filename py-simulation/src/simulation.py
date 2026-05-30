@@ -14,7 +14,31 @@ class Simulation:
     def __init__(self, config: Config):
         self.config = config
         self.array = DualRingArray(config.array)
-        self.drone = DroneSource(config.drone)
+        self.env = Environment(
+            config.environment,
+            config.signal.fs,
+            self.array.n_mics,
+            config.signal.duration,
+            array_center=np.array([0.0, 0.0, 0.0]),
+        )
+
+        absorption = self.env.absorption if self.env.enabled else None
+        refraction = self.env.refraction if self.env.enabled else None
+
+        self.drone = DroneSource(
+            config.drone,
+            absorption=absorption,
+            refraction=refraction,
+            scintillation_enabled=(
+                self.env.enabled and
+                config.environment.turbulence.amplitude_scintillation
+            ),
+            scintillation_strength=(
+                config.environment.turbulence.scintillation_strength
+                if self.env.enabled else 0.0
+            ),
+        )
+
         self.srp = SRPPhatProcessor(
             array=self.array,
             fs=config.signal.fs,
@@ -26,28 +50,35 @@ class Simulation:
             frequency_weight=config.srpphat.frequency_weight,
             detection_config=config.srpphat.detection,
         )
-        self.env = Environment(
-            config.environment,
-            config.signal.fs,
-            self.array.n_mics,
-            config.signal.duration,
-            array_center=np.array([0.0, 0.0, 0.0]),
-        )
+
+    def _compute_snr_db(self, cfg):
+        snr_db = cfg.signal.snr_db
+        if snr_db is not None:
+            return float(snr_db)
+
+        mic = cfg.mic
+        ref_spl = 94.0
+        ein_db = ref_spl - mic.snr_dba
+        dist = cfg.drone.distance
+        spl_at_mic = cfg.signal.drone_spl_db - 20 * np.log10(max(dist, 0.1))
+
+        if self.env.enabled:
+            bpf = (cfg.drone.rpm * cfg.drone.num_blades) / 60.0
+            harmonics = np.arange(1, getattr(cfg.drone, 'bpf_harmonics', 6) + 1)
+            freqs = harmonics * bpf
+            alphas = self.env.absorption.coefficient(freqs)
+            alpha_avg = np.mean(alphas)
+            absorption_loss = alpha_avg * dist
+            spl_at_mic -= absorption_loss
+
+        return float(spl_at_mic - ein_db)
 
     def run(self):
         cfg = self.config
         fs = cfg.signal.fs
         duration = cfg.signal.duration
 
-        # Compute SNR: manual override or derive from ICS-52000 EIN + drone SPL
-        snr_db = cfg.signal.snr_db
-        if snr_db is None:
-            mic = cfg.mic
-            ref_spl = 94.0  # dB SPL reference for SNR spec
-            ein_db = ref_spl - mic.snr_dba  # Equivalent Input Noise (dBA)
-            dist = cfg.drone.distance
-            spl_at_mic = cfg.signal.drone_spl_db - 20 * np.log10(max(dist, 0.1))
-            snr_db = float(spl_at_mic - ein_db)
+        snr_db = self._compute_snr_db(cfg)
 
         tilt_deg = cfg.environment.ground.tilt_deg if cfg.environment.enabled else 0.0
         if tilt_deg != 0:
@@ -87,6 +118,7 @@ class Simulation:
         srp_maps = []
         peak_values = np.zeros(n_frames)
         detections = np.zeros(n_frames, dtype=bool)
+        frame_snrs = np.full(n_frames, np.nan)
 
         print(f"Processing {n_frames} frames...")
         for i, start in enumerate(frame_starts):
@@ -102,6 +134,8 @@ class Simulation:
             srp_maps.append(result["srp_map"])
             peak_values[i] = result["peak_value"]
             detections[i] = result["detected"]
+
+            frame_snrs[i] = snr_db
 
             if (i + 1) % max(1, n_frames // 10) == 0:
                 print(f"  Frame {i + 1}/{n_frames}")
@@ -120,6 +154,7 @@ class Simulation:
             "center_samples": center_samples,
             "n_frames": n_frames,
             "fs": fs,
+            "frame_snrs": frame_snrs,
         }
 
         print("Computing metrics...")
@@ -139,6 +174,7 @@ class Simulation:
             peak_values=results["peak_values"],
             detections=results["detections"],
             timestamps=results["timestamps"],
+            frame_snrs=results["frame_snrs"],
         )
         print(f"Data saved to {output_dir / 'simulation_results.npz'}")
 

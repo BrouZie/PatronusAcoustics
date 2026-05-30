@@ -1,15 +1,58 @@
 import numpy as np
 from scipy.signal import butter, sosfilt
 
+from .absorption import AtmosphericAbsorption
+from .refraction import RefractionModel
+
+RHO0 = 1.2
+C0 = 343.0
+
 
 class GroundReflector:
-    def __init__(self, height_m, reflection_coefficient):
+    def __init__(self, height_m, reflection_coefficient,
+                 model="constant", flow_resistivity=200000.0):
         self.height_m = height_m
         self.reflection_coefficient = reflection_coefficient
+        self.model = model
+        self.flow_resistivity = flow_resistivity
+        self._cache = {}
 
     def get_image_source(self, drone_pos):
         x, y, z = drone_pos
         return np.array([x, y, -(z + 2 * self.height_m)])
+
+    def get_reflection_coefficient(self, f, theta_i):
+        """Frequency- and angle-dependent reflection coefficient.
+
+        Parameters
+        ----------
+        f : ndarray
+            Frequencies in Hz.
+        theta_i : float
+            Incidence angle from the normal (radians).
+
+        Returns
+        -------
+        R : ndarray
+            Complex reflection coefficient.
+        """
+        if self.model == "constant":
+            return np.full_like(f, self.reflection_coefficient, dtype=complex)
+
+        if self.model == "delany_bazley":
+            sigma = self.flow_resistivity
+            f = np.asarray(f, dtype=float)
+            E = np.where(f > 0, RHO0 * f / sigma, 1e-15)
+            E = np.maximum(E, 1e-15)
+
+            Z = 1.0 + 0.0571 * E ** (-0.754) + 1j * 0.0871 * E ** (-0.732)
+
+            cos_theta = np.cos(theta_i)
+            R = (Z * cos_theta - 1.0) / (Z * cos_theta + 1.0)
+            R[~np.isfinite(R)] = 1.0
+            return R
+
+        return np.full_like(f, self.reflection_coefficient, dtype=complex)
 
 
 class DirectionalNoiseSource:
@@ -212,9 +255,12 @@ class Environment:
         self.enabled = config.enabled
         if not self.enabled:
             return
+        gc = config.ground
         self.ground = GroundReflector(
-            config.ground.height_m,
-            config.ground.reflection_coefficient,
+            gc.height_m,
+            gc.reflection_coefficient,
+            model=gc.model,
+            flow_resistivity=gc.flow_resistivity,
         )
         self.fs = fs
         self.n_mics = n_mics
@@ -226,6 +272,23 @@ class Environment:
         self._traffic_source = None
         self._bird_source = None
         self._ambient_source = None
+
+        self.absorption = AtmosphericAbsorption(
+            temperature_C=config.atmospheric.temperature_C,
+            humidity_pct=config.atmospheric.humidity_pct,
+            pressure_kPa=config.atmospheric.pressure_kPa,
+        )
+
+        self.refraction = None
+        if config.refraction.enabled:
+            self.refraction = RefractionModel(
+                wind_shear_ms_per_m=config.refraction.wind_shear_ms_per_m,
+                temperature_lapse_rate=config.refraction.temperature_lapse_rate,
+                roughness_length=config.refraction.roughness_length,
+            )
+
+        self.scintillation_enabled = config.turbulence.amplitude_scintillation
+        self.scintillation_strength = config.turbulence.scintillation_strength
 
         nc = config.noise
         if nc.wind_speed_ms > 0:

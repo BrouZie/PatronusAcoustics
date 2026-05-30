@@ -43,6 +43,7 @@ class DroneConfig:
     initial_bearing: dict = field(default_factory=lambda: {"azimuth_deg": 15.0, "elevation_deg": 10.0})
     motion: MotionConfig = field(default_factory=MotionConfig)
     trajectory: dict = field(default_factory=dict)
+    bpf_harmonics: int = 6
 
 
 @dataclass
@@ -85,6 +86,29 @@ class GroundConfig:
     height_m: float = 5.0
     tilt_deg: float = 0.0
     reflection_coefficient: float = 0.5
+    model: str = "constant"
+    flow_resistivity: float = 200000.0
+
+
+@dataclass
+class AtmosphericConfig:
+    temperature_C: float = 20.0
+    humidity_pct: float = 50.0
+    pressure_kPa: float = 101.325
+
+
+@dataclass
+class RefractionConfig:
+    enabled: bool = False
+    wind_shear_ms_per_m: float = 0.0
+    temperature_lapse_rate: float = -0.0065
+    roughness_length: float = 0.03
+
+
+@dataclass
+class TurbulenceConfig:
+    amplitude_scintillation: bool = False
+    scintillation_strength: float = 0.1
 
 
 @dataclass
@@ -102,6 +126,9 @@ class EnvironmentConfig:
     enabled: bool = False
     ground: GroundConfig = field(default_factory=GroundConfig)
     noise: NoiseConfig = field(default_factory=NoiseConfig)
+    atmospheric: AtmosphericConfig = field(default_factory=AtmosphericConfig)
+    refraction: RefractionConfig = field(default_factory=RefractionConfig)
+    turbulence: TurbulenceConfig = field(default_factory=TurbulenceConfig)
 
 
 @dataclass
@@ -149,8 +176,17 @@ class Config:
         ground = GroundConfig(**ground_data)
         noise_data = env_data.get("noise", {}) or {}
         noise = NoiseConfig(**noise_data)
-        env_kwargs = {k: v for k, v in env_data.items() if k not in ("ground", "noise")}
-        environment = EnvironmentConfig(**env_kwargs, ground=ground, noise=noise)
+        atmos_data = env_data.get("atmospheric", {}) or {}
+        atmospheric = AtmosphericConfig(**atmos_data)
+        refrac_data = env_data.get("refraction", {}) or {}
+        refraction = RefractionConfig(**refrac_data)
+        turb_data = env_data.get("turbulence", {}) or {}
+        turbulence = TurbulenceConfig(**turb_data)
+        env_kwargs = {k: v for k, v in env_data.items()
+                      if k not in ("ground", "noise", "atmospheric", "refraction", "turbulence")}
+        environment = EnvironmentConfig(**env_kwargs, ground=ground, noise=noise,
+                                        atmospheric=atmospheric, refraction=refraction,
+                                        turbulence=turbulence)
 
         output = OutputConfig(**data.get("output", {}))
         return cls(array=array, signal=signal, mic=mic, drone=drone, srpphat=srpphat,

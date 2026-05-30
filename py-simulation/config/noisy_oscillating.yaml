@@ -11,9 +11,9 @@
 # at unfavorable geometries. Directional noise (wind, birds, ambient)
 # adds spatially-correlated interference.
 #
-# This config should produce DETECTION at closest approach and
-# NON-DETECTION at farthest, with smooth transitions — ideal for
-# studying detection thresholds and angular accuracy vs. SNR.
+# ISO 9613-1 atmospheric absorption is ENABLED for realistic
+# high-frequency attenuation at longer ranges. Refraction via
+# effective sound speed gradient is also active.
 #
 # Use as base for sweep experiments:
 #   python -m src.sweep config/sweep_ground.yaml
@@ -44,6 +44,7 @@ drone:
   num_blades: 2            # blades per rotor
   num_rotors: 4            # number of rotors
   distance: 30.0           # reference (overridden by trajectory)
+  bpf_harmonics: 6
   initial_bearing:
     azimuth_deg: 0.0       # degrees from boresight
     elevation_deg: 30.0    # matches oscillating CPA elevation
@@ -71,34 +72,14 @@ srpphat:
     peak_to_mean_threshold_db: 5.0
 
 # ── Environment Simulation ──────────────────────────────────────────────
-# All noise sources (wind, birds, ambient) are ENABLED by default.
-# Ground reflection adds frequency-dependent cancellation.
-# The combination creates realistic switching: detection at close range,
-# non-detection at far range, with noise and multipath modulating the
-# transition region.
-#
-# KEY FINDING: Ground reflection (coeff=0.03) combined with directional
-# noise creates smooth detection-rate transitions across the oscillation
-# cycle — unlike the sharp cliff at coeff=0.05 with a static arc.
-#
-# Guidelines:
-#   coeff = 0.00  → ~95% det (ground-free)
-#   coeff = 0.03  → ~50% det across oscillation (this config)
-#   coeff = 0.05  → ~1% det at 15m with HPF (too harsh)
-#   coeff = 0.10  → detection collapses entirely
-#   tilt  = 15-30 → tilted upward, changes multipath geometry
-#   wind_direction_deg → 0=front, 90=right, -90=left
-#   wind_speed_ms → 0.5=still  1=breeze  2=moderate  3=strong
-#   traffic_direction_deg → azimuth of road from array
-#   traffic       → "none" / "light" / "moderate" / "heavy"
-#   bird_activity → 0-1 (0.05=occasional, 0.3=many birds)
-#   ambient_db    → 0-30 (5=quiet, 15=noticeable, 25=loud)
 environment:
   enabled: true
   ground:
     height_m: 5.0            # array mast height above ground (m)
     tilt_deg: 15.0           # boresight tilt from horizontal (degrees)
     reflection_coefficient: 0.03  # moderate ground reflectivity
+    model: constant          # impedance model: "constant" or "delany_bazley"
+    flow_resistivity: 200000.0  # Pa·s/m² (grass)
   noise:
     wind_speed_ms: 1.5       # wind speed (m/s)
     wind_direction_deg: 0.0  # wind azimuth (0=front, 90=right)
@@ -106,6 +87,18 @@ environment:
     traffic_direction_deg: 90.0  # road azimuth from array
     bird_activity: 0.10      # bird chirp density (0-1)
     ambient_db: 10.0         # ambient/pink noise level (0-30)
+  atmospheric:
+    temperature_C: 20.0       # degrees Celsius
+    humidity_pct: 50.0        # relative humidity (%)
+    pressure_kPa: 101.325     # atmospheric pressure (kPa)
+  refraction:
+    enabled: false
+    wind_shear_ms_per_m: 0.1  # wind gradient (m/s per m height)
+    temperature_lapse_rate: -0.0065  # °C/m (standard atmosphere)
+    roughness_length: 0.03    # surface roughness (m)
+  turbulence:
+    amplitude_scintillation: false
+    scintillation_strength: 0.1
 
 output:
   animation_fps: 15

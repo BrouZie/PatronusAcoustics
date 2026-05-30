@@ -5,11 +5,13 @@ from .trajectory import make_trajectory
 
 
 class DroneSource:
-    def __init__(self, config):
+    def __init__(self, config, absorption=None, refraction=None,
+                 scintillation_enabled=False, scintillation_strength=0.1):
         self.rpm = config.rpm
         self.num_blades = config.num_blades
         self.bpf = (config.rpm * config.num_blades) / 60.0
         self.num_rotors = config.num_rotors
+        self.bpf_harmonics = getattr(config, 'bpf_harmonics', 6)
         self.speed_sound = 343.0
 
         self.trajectory = make_trajectory(config)
@@ -17,14 +19,22 @@ class DroneSource:
         self.mic_positions_world = None
         self.mic = getattr(config, 'mic', None)
 
+        self.absorption = absorption
+        self.refraction = refraction
+        self.scintillation_enabled = scintillation_enabled
+        self.scintillation_strength = scintillation_strength
+
     def get_position(self, t):
         return self.trajectory.get_position(t)
+
+    def set_absorption(self, absorption):
+        self.absorption = absorption
 
     def _generate_source_signal(self, n_samples, fs):
         t = np.arange(n_samples) / fs
 
         signal = np.zeros(n_samples)
-        for k in range(1, 7):
+        for k in range(1, self.bpf_harmonics + 1):
             amp = 1.0 / k
             freq = k * self.bpf
             phase = np.random.uniform(0, 2 * np.pi)
@@ -70,26 +80,221 @@ class DroneSource:
         tau[:, 1:], _ = lfilter([1.0], [1.0, -a], innovations, axis=1, zi=zi)
         return tau
 
-    def _apply_delays_reflected(self, source, array, fs, pos, mic_positions_world):
-        image_pos = self.ground_reflector.get_image_source(pos)
-        coeff = self.ground_reflector.reflection_coefficient
-        dists_direct = np.linalg.norm(mic_positions_world - pos, axis=1)
-        dists_image = np.linalg.norm(mic_positions_world - image_pos, axis=1)
+    def _generate_scintillation(self, n_samples, fs, n_mics):
+        if not self.scintillation_enabled:
+            return np.ones((n_mics, n_samples))
+        dt = 1.0 / fs
+        tau_c = 0.05
+        theta = 1.0 / tau_c
+        a = 1.0 - theta * dt
+        sigma = self.scintillation_strength
+        b = sigma * np.sqrt(2 * theta * dt)
+        chi = np.zeros((n_mics, n_samples))
+        chi[:, 0] = np.random.randn(n_mics) * sigma
+        innovations = np.random.randn(n_mics, n_samples - 1) * b
+        zi = a * chi[:, 0:1]
+        chi[:, 1:], _ = lfilter([1.0], [1.0, -a], innovations, axis=1, zi=zi)
+        return np.exp(chi)
+
+    def _apply_absorption_filter(self, S, freqs, distances):
+        """Apply atmospheric absorption in frequency domain (per-mic).
+
+        Parameters
+        ----------
+        S : ndarray
+            FFT of source signal, shape (n_pad,).
+        freqs : ndarray
+            Frequency bins, shape (n_pad,).
+        distances : ndarray
+            Distance to each mic, shape (n_mics,).
+
+        Returns
+        -------
+        S_abs : ndarray
+            Absorption-filtered FFT, shape (n_mics, n_pad).
+        """
+        n_mics = len(distances)
+        n_pad = len(S)
+
+        if self.absorption is None:
+            S_abs = np.empty((n_mics, n_pad), dtype=complex)
+            S_abs[:] = S
+            return S_abs
+
+        S_abs = np.zeros((n_mics, n_pad), dtype=complex)
+        for m in range(n_mics):
+            H_abs = self.absorption.pressure_filter(np.abs(freqs), distances[m])
+            S_abs[m] = S * H_abs
+        return S_abs
+
+    def _propagate_stationary(self, source, array, fs, pos, turbulence):
         n = len(source)
+        n_mics = array.n_mics
         n_pad = 2 ** int(np.ceil(np.log2(n + n)))
+
         source_pad = np.pad(source, (0, n_pad - n))
         S = np.fft.fft(source_pad)
         freqs = np.fft.fftfreq(n_pad, 1 / fs)
-        result = np.zeros((array.n_mics, n))
-        for m in range(array.n_mics):
-            delay_img = dists_image[m] / self.speed_sound
-            H = np.exp(-1j * 2 * np.pi * freqs * delay_img)
-            delayed = np.fft.ifft(S * H).real[:n]
-            atten = coeff * dists_direct[m] / (dists_image[m] + 1e-6)
-            result[m] = -atten * delayed
+
+        mic_pos = (self.mic_positions_world if
+                   (self.ground_reflector is not None and
+                    self.mic_positions_world is not None)
+                   else array.positions)
+        dists = np.linalg.norm(mic_pos - pos, axis=1)
+        delays = dists / self.speed_sound
+        attens = 1.0 / (dists + 1e-6)
+
+        S_abs = self._apply_absorption_filter(S, freqs, dists)
+
+        result = np.zeros((n_mics, n))
+        for m in range(n_mics):
+            turb = turbulence[m, 0] if turbulence is not None else 0.0
+            H = np.exp(-1j * 2 * np.pi * freqs * (delays[m] + turb))
+            filtered = np.fft.ifft(S_abs[m] * H).real[:n]
+            result[m] = attens[m] * filtered
         return result
 
-    def generate_mic_signals(self, array, fs, duration, snr_db):
+    def _propagate_reflected(self, source, array, fs, pos, turbulence):
+        """Propagate ground-reflected path (stationary source, FFT-based)."""
+        image_pos = self.ground_reflector.get_image_source(pos)
+        mic_pos = self.mic_positions_world
+        n = len(source)
+        n_mics = array.n_mics
+        n_pad = 2 ** int(np.ceil(np.log2(n + n)))
+
+        source_pad = np.pad(source, (0, n_pad - n))
+        S = np.fft.fft(source_pad)
+        freqs = np.fft.fftfreq(n_pad, 1 / fs)
+
+        dists_direct = np.linalg.norm(mic_pos - pos, axis=1)
+        dists_image = np.linalg.norm(mic_pos - image_pos, axis=1)
+
+        S_ref = self._apply_absorption_filter(S, freqs, dists_image)
+
+        result = np.zeros((n_mics, n))
+        for m in range(n_mics):
+            turb = turbulence[m, 0] * 0.5 if turbulence is not None else 0.0
+            delay_img = dists_image[m] / self.speed_sound + turb
+
+            R = self.ground_reflector.reflection_coefficient
+            if self.ground_reflector.model != "constant":
+                R = self.ground_reflector.get_reflection_coefficient(
+                    np.abs(freqs), 0.0
+                )
+
+            if np.isscalar(R):
+                H = np.exp(-1j * 2 * np.pi * freqs * delay_img)
+                filtered = np.fft.ifft(S_ref[m] * H).real[:n]
+            else:
+                H = np.exp(-1j * 2 * np.pi * freqs * delay_img)
+                filtered = np.fft.ifft(S_ref[m] * R * H).real[:n]
+
+            atten = abs(R if not np.isscalar(R) else R) * dists_direct[m] / (dists_image[m] + 1e-6)
+            result[m] = -atten * filtered
+        return result
+
+    def _propagate_moving_per_sample(self, source, array, fs, positions, turbulence):
+        """Propagate a moving source using per-sample linear interpolation.
+
+        Returns signals with 1/r attenuation + delays but WITHOUT absorption.
+        """
+        n = len(source)
+        n_mics = array.n_mics
+
+        mic_pos = (self.mic_positions_world if
+                   (self.ground_reflector is not None and
+                    self.mic_positions_world is not None)
+                   else array.positions)
+
+        result = np.zeros((n_mics, n))
+        for i in range(min(n, len(positions))):
+            pos = positions[i]
+            dists = np.linalg.norm(mic_pos - pos, axis=1)
+            delays = dists / self.speed_sound
+
+            for m in range(n_mics):
+                turb = turbulence[m, i] if turbulence is not None else 0.0
+                atten = 1.0 / (dists[m] + 1e-6)
+                delay_samp = (delays[m] + turb) * fs
+                idx_float = i - delay_samp
+                idx_int = int(np.floor(idx_float))
+                frac = idx_float - idx_int
+                if 0 <= idx_int < n - 1:
+                    result[m, i] = atten * (
+                        (1 - frac) * source[idx_int] + frac * source[idx_int + 1]
+                    )
+        return result
+
+    def _propagate_reflected_moving_per_sample(self, source, array, fs, positions, turbulence):
+        """Propagate ground-reflected path (moving source, per-sample)."""
+        n = len(source)
+        n_mics = array.n_mics
+        mic_pos = self.mic_positions_world
+        result = np.zeros((n_mics, n))
+
+        for i in range(min(n, len(positions))):
+            pos = positions[i]
+            image_pos = self.ground_reflector.get_image_source(pos)
+            dists_direct = np.linalg.norm(mic_pos - pos, axis=1)
+            dists_image = np.linalg.norm(mic_pos - image_pos, axis=1)
+
+            R = self.ground_reflector.reflection_coefficient
+
+            for m in range(n_mics):
+                turb = turbulence[m, i] * 0.5 if turbulence is not None else 0.0
+                delay_img = dists_image[m] / self.speed_sound + turb
+                atten = R * dists_direct[m] / (dists_image[m] + 1e-6)
+                delay_samp = delay_img * fs
+                idx_float = i - delay_samp
+                idx_int = int(np.floor(idx_float))
+                frac = idx_float - idx_int
+                if 0 <= idx_int < n - 1:
+                    result[m, i] = -atten * (
+                        (1 - frac) * source[idx_int] + frac * source[idx_int + 1]
+                    )
+        return result
+
+    def _apply_absorption_ola(self, mic_signals, fs, distances):
+        """Apply frequency-dependent absorption using overlap-add STFT.
+
+        Each mic signal is filtered by H_abs(f, d(t)) in the frequency
+        domain block-wise. Applied as a post-process after the per-sample
+        delay+attenuation propagation.
+        """
+        if self.absorption is None:
+            return mic_signals
+
+        n_mics, n = mic_signals.shape
+        block_size = 2048
+        hop = block_size // 2
+        window = np.hanning(block_size)
+
+        output = np.zeros_like(mic_signals)
+        overlap_cnt = np.zeros(n)
+
+        for start in range(0, n - block_size + 1, hop):
+            end = start + block_size
+            center = start + block_size // 2
+
+            d = distances[:, center]
+
+            S = np.fft.fft(mic_signals[:, start:end] * window[None, :])
+            freqs = np.fft.fftfreq(block_size, 1 / fs)
+
+            alpha = self.absorption.coefficient(np.abs(freqs))
+            H_abs = np.exp(-alpha[None, :] * d[:, None] / 8.686)
+
+            S_abs = S * H_abs
+            out_block = np.fft.ifft(S_abs).real
+            output[:, start:end] += out_block
+            overlap_cnt[start:end] += 1.0
+
+        for m in range(n_mics):
+            output[m] /= (overlap_cnt + 1e-10)
+
+        return output
+
+    def generate_mic_signals(self, array, fs, duration, snr_db=None):
         n_samples = int(duration * fs)
         n_mics = array.n_mics
         t = np.arange(n_samples) / fs
@@ -98,106 +303,48 @@ class DroneSource:
         source_positions = np.zeros((n_samples, 3))
 
         turbulence = self._generate_turbulence(n_samples, fs, n_mics)
+        scintillation = self._generate_scintillation(n_samples, fs, n_mics)
 
         has_ground_reflection = (
             self.ground_reflector is not None
             and self.mic_positions_world is not None
         )
-        mic_pos = self.mic_positions_world if has_ground_reflection else array.positions
 
         if self.trajectory.is_stationary:
             pos = self.trajectory.get_position(0)
             source_positions[:] = pos
-            mic_signals = self._apply_delays_stationary(source, array, fs, pos, turbulence)
+            mic_signals = self._propagate_stationary(source, array, fs, pos, turbulence)
             if has_ground_reflection:
-                mic_signals += self._apply_delays_reflected_turbulent(
-                    source, array, fs, pos, mic_pos, turbulence
+                mic_signals += self._propagate_reflected(
+                    source, array, fs, pos, turbulence
                 )
         else:
-            mic_signals = np.zeros((n_mics, n_samples))
             for i in range(n_samples):
-                pos = self.trajectory.get_position(t[i])
-                source_positions[i] = pos
+                source_positions[i] = self.trajectory.get_position(t[i])
 
-                dists_direct = np.linalg.norm(mic_pos - pos, axis=1)
-                delays_direct = dists_direct / self.speed_sound
+            mic_signals = self._propagate_moving_per_sample(
+                source, array, fs, source_positions, turbulence
+            )
+            if has_ground_reflection:
+                mic_signals += self._propagate_reflected_moving_per_sample(
+                    source, array, fs, source_positions, turbulence
+                )
 
-                if has_ground_reflection:
-                    image_pos = self.ground_reflector.get_image_source(pos)
-                    dists_image = np.linalg.norm(mic_pos - image_pos, axis=1)
-                    delays_image = dists_image / self.speed_sound
-                    coeff = self.ground_reflector.reflection_coefficient
+            mic_pos = (self.mic_positions_world if has_ground_reflection
+                       else array.positions)
+            dists = np.linalg.norm(
+                mic_pos[:, None, :] - source_positions[None, :, :], axis=-1
+            )
+            mic_signals = self._apply_absorption_ola(mic_signals, fs, dists)
 
-                for m in range(n_mics):
-                    turb = turbulence[m, i]
-                    atten = 1.0 / (dists_direct[m] + 1e-6)
-                    delay_samp = (delays_direct[m] + turb) * fs
-                    idx = i - delay_samp
-                    if 0 <= idx < n_samples - 1:
-                        int_idx = int(np.floor(idx))
-                        frac = idx - int_idx
-                        mic_signals[m, i] = atten * (
-                            (1 - frac) * source[int_idx] + frac * source[int_idx + 1]
-                        )
-
-                    if has_ground_reflection:
-                        turb_img = turbulence[m, i] * 0.5
-                        atten_img = coeff * dists_direct[m] / (dists_image[m] + 1e-6)
-                        delay_samp_img = (delays_image[m] + turb_img) * fs
-                        idx_img = i - delay_samp_img
-                        if 0 <= idx_img < n_samples - 1:
-                            int_idx = int(np.floor(idx_img))
-                            frac = idx_img - int_idx
-                            mic_signals[m, i] -= atten_img * (
-                                (1 - frac) * source[int_idx] + frac * source[int_idx + 1]
-                            )
-
+        mic_signals *= scintillation
         mic_signals = self._apply_aop_clipping(mic_signals)
 
-        sig_power = np.mean(mic_signals ** 2, axis=1, keepdims=True)
-        noise_power = sig_power / (10.0 ** (snr_db / 10.0))
-        mic_signals += np.sqrt(noise_power) * np.random.randn(*mic_signals.shape)
+        if snr_db is not None:
+            sig_power = np.mean(mic_signals ** 2, axis=1, keepdims=True)
+            noise_power = sig_power / (10.0 ** (snr_db / 10.0))
+            mic_signals += np.sqrt(noise_power) * np.random.randn(*mic_signals.shape)
 
         return mic_signals, source_positions
 
-    def _apply_delays_reflected_turbulent(self, source, array, fs, pos, mic_positions_world, turbulence):
-        image_pos = self.ground_reflector.get_image_source(pos)
-        coeff = self.ground_reflector.reflection_coefficient
-        dists_direct = np.linalg.norm(mic_positions_world - pos, axis=1)
-        dists_image = np.linalg.norm(mic_positions_world - image_pos, axis=1)
-        n = len(source)
-        n_pad = 2 ** int(np.ceil(np.log2(n + n)))
-        source_pad = np.pad(source, (0, n_pad - n))
-        S = np.fft.fft(source_pad)
-        freqs = np.fft.fftfreq(n_pad, 1 / fs)
-        result = np.zeros((array.n_mics, n))
-        for m in range(array.n_mics):
-            turb = turbulence[m, 0] * 0.5
-            delay_img = dists_image[m] / self.speed_sound + turb
-            H = np.exp(-1j * 2 * np.pi * freqs * delay_img)
-            delayed = np.fft.ifft(S * H).real[:n]
-            atten = coeff * dists_direct[m] / (dists_image[m] + 1e-6)
-            result[m] = -atten * delayed
-        return result
 
-    def _apply_delays_stationary(self, source, array, fs, pos, turbulence=None):
-        n = len(source)
-        n_mics = array.n_mics
-        n_pad = 2 ** int(np.ceil(np.log2(n + n)))
-
-        source_pad = np.pad(source, (0, n_pad - n))
-        S = np.fft.fft(source_pad)
-        freqs = np.fft.fftfreq(n_pad, 1 / fs)
-
-        dists = np.linalg.norm(array.positions - pos, axis=1)
-        delays = dists / self.speed_sound
-        attens = 1.0 / (dists + 1e-6)
-
-        result = np.zeros((n_mics, n))
-        for m in range(n_mics):
-            turb = turbulence[m, 0] if turbulence is not None else 0.0
-            H = np.exp(-1j * 2 * np.pi * freqs * (delays[m] + turb))
-            delayed = np.fft.ifft(S * H).real[:n]
-            result[m] = attens[m] * delayed
-
-        return result
