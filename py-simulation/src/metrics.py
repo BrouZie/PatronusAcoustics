@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.signal import butter, sosfilt
 from dataclasses import dataclass, field
 
 
@@ -70,6 +71,100 @@ def beamwidth_3db(srp_map, az_range_deg, el_range_deg):
     el_width = np.sum(el_above) * (el_deg[1] - el_deg[0]) if np.any(el_above) else 0.0
 
     return np.sqrt(az_width * el_width)
+
+
+def band_rms(signal, fs, band=(500, 4000)):
+    """Band-limited RMS per channel (dB).
+
+    Parameters
+    ----------
+    signal : ndarray, shape (n_mics, n_samples)
+    fs : int
+    band : (float, float)
+        Low and high frequency in Hz.
+
+    Returns
+    -------
+    rms_db : float
+        Mean RMS across channels in dB (arbitrary reference).
+    """
+    n = signal.shape[1]
+    freqs = np.fft.rfftfreq(n, 1.0 / fs)
+    mask = (freqs >= band[0]) & (freqs <= band[1])
+    if not np.any(mask):
+        return -np.inf
+    X = np.fft.rfft(signal, axis=1)
+    band_power = np.mean(np.abs(X[:, mask]) ** 2)
+    return 10.0 * np.log10(band_power + 1e-30)
+
+
+def spectral_flatness(signal, fs, band=(500, 4000)):
+    """Spectral flatness in a frequency band, averaged across channels.
+
+    Returns 0 for a pure tone, 1 for white noise.
+    """
+    n = signal.shape[1]
+    freqs = np.fft.rfftfreq(n, 1.0 / fs)
+    mask = (freqs >= band[0]) & (freqs <= band[1])
+    if not np.any(mask):
+        return 1.0
+    X = np.fft.rfft(signal, axis=1)
+    band_power = np.abs(X[:, mask]) ** 2
+    geo = np.exp(np.mean(np.log(band_power + 1e-30), axis=1))
+    arith = np.mean(band_power, axis=1)
+    flatness = np.mean(geo / (arith + 1e-30))
+    return float(np.clip(flatness, 0.0, 1.0))
+
+
+def compute_gate1(mic_signals, fs, fft_size, hop_length,
+                  band=(500, 4000), rms_threshold_db=5.0,
+                  flatness_threshold=0.5):
+    """Per-frame Gate 1 status computed from post-noise mic signals.
+
+    Uses the spec's two-stage logic:
+      1. Band-limited RMS (500 Hz – 4 kHz) above ambient floor
+      2. Spectral flatness below 0.5 (tonal structure)
+
+    The ambient floor is the 5th percentile of ALL frames' band RMS,
+    approximating the quietest signal level over the recording. This
+    is a substitute for the real system's long-term EMA floor (which
+    would be established over minutes of quiet operation).
+
+    Parameters
+    ----------
+    mic_signals : ndarray, shape (n_mics, n_samples)
+    fs : int
+    fft_size, hop_length : int
+        Frame parameters matching SRP-PHAT.
+    band : (float, float)
+    rms_threshold_db : float
+        RMS must exceed floor by this amount (default 5.0 dB).
+    flatness_threshold : float
+        Flatness must be below this value (default 0.5).
+
+    Returns
+    -------
+    gate1 : ndarray bool, shape (n_frames,)
+    rms_db_above_floor : ndarray float, shape (n_frames,)
+    flatness_vals : ndarray float, shape (n_frames,)
+    """
+    n_samples = mic_signals.shape[1]
+    frame_starts = np.arange(0, n_samples - fft_size + 1, hop_length)
+    n_frames = len(frame_starts)
+
+    rms_all = np.zeros(n_frames)
+    flatness_vals = np.zeros(n_frames)
+
+    for i, start in enumerate(frame_starts):
+        frame = mic_signals[:, start:start + fft_size]
+        rms_all[i] = band_rms(frame, fs, band)
+        flatness_vals[i] = spectral_flatness(frame, fs, band)
+
+    floor = float(np.percentile(rms_all, 5)) if n_frames > 1 else rms_all[0]
+    rms_db_above_floor = rms_all - floor
+    gate1 = (rms_db_above_floor > rms_threshold_db) & (flatness_vals < flatness_threshold)
+
+    return gate1, rms_db_above_floor, flatness_vals
 
 
 def compute_metrics(results, array, srp_processor):

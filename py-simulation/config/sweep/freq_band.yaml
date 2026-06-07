@@ -1,0 +1,7 @@
+# Sweep: SRP-PHAT frequency band optimization
+base_config: config/default.yaml
+sweep:
+  srpphat.min_freq: [0, 300, 500, 700]
+  srpphat.max_freq: [1500, 2000, 3000]
+overrides:
+  signal.duration: 5.0

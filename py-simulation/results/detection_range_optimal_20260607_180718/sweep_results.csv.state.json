@@ -1,0 +1,77 @@
+{
+  "sweep_config": "/home/brouzie/Projects/personal/PatronusAcoustics/py-simulation/config/sweep/detection_range_optimal.yaml",
+  "started": "2026-06-07T08:07:18.185725+00:00",
+  "output_path": "/home/brouzie/Projects/personal/PatronusAcoustics/py-simulation/results/detection_range_optimal_20260607_180718/sweep_results.csv",
+  "completed": [
+    {
+      "combo": [
+        10
+      ],
+      "hash": "d96a855934af",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        20
+      ],
+      "hash": "9f0562493ee2",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        30
+      ],
+      "hash": "68b59c0cdefe",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        50
+      ],
+      "hash": "a72ce753a61c",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        75
+      ],
+      "hash": "f27b42dfeb26",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        100
+      ],
+      "hash": "8ebd2fdd143a",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        150
+      ],
+      "hash": "f44be98cebed",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        200
+      ],
+      "hash": "a91bdbf14a61",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        300
+      ],
+      "hash": "19a5a22f96d6",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        500
+      ],
+      "hash": "cdc21feb399d",
+      "status": "ok"
+    }
+  ]
+}

@@ -3,17 +3,23 @@
 ## Quick Start
 
 ```bash
+# Install dependencies (uses uv.lock for pinned versions)
+uv sync
+
 # Default realistic simulation (15s, environment, oscillating drone)
-python -m src.main
+uv run python -m src.main
 
 # Fast iteration (4s, coarse grid, 2 kHz, no output files)
-python -m src.main -c config/quick.yaml
+uv run python -m src.main -c config/quick.yaml
 
 # Benchmark / regression test (2s, stationary, no environment)
-python -m src.main -c config/benchmark.yaml
+uv run python -m src.main -c config/benchmark.yaml
 
 # Profile (top-20 cumtime)
-python -m src.main -c config/benchmark.yaml --profile
+uv run python -m src.main -c config/benchmark.yaml --profile
+
+# Interactive dashboard
+uv run streamlit run src/dashboard/app.py
 ```
 
 ## CLI Flags
@@ -26,26 +32,67 @@ python -m src.main -c config/benchmark.yaml --profile
 | `--snr` | Override SNR (dB) |
 | `--duration` | Override simulation duration (s) |
 | `--azimuth, --elevation` | Override drone initial bearing |
+| `--moving` | Enable drone motion |
 | `--quick` | 4s, 4° resolution, 2 kHz max freq, no output files (same as `-c config/quick.yaml`) |
 | `--no-animation` | Skip animation rendering |
 | `--no-figures` | Skip summary figures |
 | `--interactive` | Show interactive figure after saving |
 | `--profile` | Profile with cProfile (top-20 cumtime) |
 | `--dry-run` | Print run name and output path, don't run |
+| `--dump-schema` | Print configuration schema with descriptions and defaults, then exit |
 | `--ring1-radius, --ring2-radius, --n-mics-1, --n-mics-2, --ring-spacing` | Array geometry overrides |
+
+## Interactive Dashboard
+
+The Streamlit dashboard provides a GUI for the simulation:
+
+```bash
+uv run streamlit run src/dashboard/app.py
+```
+
+Three tabs:
+
+1. **Simulation** — Auto-generated parameter form from Pydantic config schema (sliders for bounded numbers, checkboxes for booleans, selectboxes for enums, expanders for nested sub-configs). Quick/DEFAULT preset buttons. Cache-aware run (loads cached results when config unchanged). Results summary with metric cards and diagnostic plots (angular error timeline, PSR timeline, error distribution).
+
+2. **Sweep Results** — Browse past sweep runs via `SweepCatalog`. View CSV data in a table, explore parameter vs metric relationships with interactive scatter plots.
+
+3. **Educational** — Three interactive learning modules:
+   - **Beamforming Basics**: Polar + cartesian beampattern plots, array geometry visualization, multi-frequency overlay, ULA comparison
+   - **Ground Reflection**: Image source geometry, frequency response with interference notches, coherence vs range
+   - **Array Geometry Tradeoffs**: Dual-ring vs ULA vs UCA vs Sparse comparison with metrics table
 
 ## Sweep Runner
 
 ```bash
 # Run a sweep
-python -m src.sweep config/sweep/ground.yaml
+uv run python -m src.sweep config/sweep/detection_range.yaml
 
 # Preview combinations without running
-python -m src.sweep config/sweep/ground.yaml --dry-run
+uv run python -m src.sweep config/sweep/detection_range.yaml --dry-run
+
+# Resume from checkpoint
+uv run python -m src.sweep config/sweep/detection_range.yaml --resume
+
+# Use 8 parallel workers
+uv run python -m src.sweep config/sweep/detection_range.yaml --workers 8
 ```
 
 Sweep configs live in `config/sweep/*.yaml`. Each references `config/default.yaml` as its base.
 See [config.md](config.md) for the YAML format.
+
+Each run creates a timestamped subfolder under `results/` containing:
+- `sweep_results.csv` — incremental CSV with per-combination metrics
+- `sweep_results.csv.state.json` — checkpoint state for resume
+
+## Simulation Cache
+
+Results are automatically cached in `results/cache/<config_hash>/`. When the same config is run again (e.g., from the dashboard), cached results are loaded instead of re-running. Clear the cache with:
+
+```python
+from src.results import clear_cache
+clear_cache()          # clear all
+clear_cache(config)    # clear specific
+```
 
 ## Output Structure
 
@@ -63,7 +110,29 @@ output/<run_name>/
     └── metrics_summary.png        # PSR, beamwidth, detection rate
 ```
 
-Sweep results go to `results/` as CSV files.
+## Programmatic Access
+
+```python
+from src.config import Config
+from src.results import SweepCatalog, cached_run, clear_cache
+
+# Load and modify config
+cfg = Config.from_yaml("config/default.yaml")
+
+# Run with caching
+results = cached_run(cfg)
+metrics = results["metrics"]
+print(f"Detection rate: {metrics.detection_rate:.1%}")
+
+# Browse past sweeps
+catalog = SweepCatalog()
+for sweep in catalog.list_sweeps():
+    df = catalog.to_dataframe(sweep)
+    print(sweep.name, df["detection_rate"].mean())
+
+# Dump config schema
+print(Config.schema())
+```
 
 ## Provided Config Files
 
@@ -73,27 +142,32 @@ Sweep results go to `results/` as CSV files.
 | `-c config/quick.yaml` | 4s, 4° grid, 2 kHz, no output | 4s | ~2s |
 | `-c config/benchmark.yaml` | 2s stationary, SNR=25, 4°, 2 kHz | 2s | ~0.3s |
 
-| Sweep config | Parameters swept |
-|---|---|
-| `config/sweep/ground.yaml` | Ground reflection coefficient, array tilt |
-| `config/sweep/distance.yaml` | Closest trajectory distance, wind speed |
-| `config/sweep/array.yaml` | Ring1 radius, mic count on ring1 |
-| `config/sweep/atmospheric.yaml` | Humidity, source distance |
-| `config/sweep/detection_range.yaml` | Source distance (10–500m) |
+| Sweep config | Parameters swept | Combos |
+|---|---|---|
+| `config/sweep/mounting_height.yaml` | Height × ground model (constant/Delany-Bazley) | 16 |
+| `config/sweep/gate_threshold.yaml` | PSR threshold (2–10 dB) | 18 |
+| `config/sweep/freq_band.yaml` | Min/max frequency band limits | 12 |
+| `config/sweep/detection_range.yaml` | Source distance (10–300 m, full band) | 10 |
+| `config/sweep/detection_range_optimal.yaml` | Source distance (10–500 m, 500–2000 Hz band) | 10 |
 
 > Timings on **12th Gen i7-1255U** (Alder Lake, 10c/12t). C++ acceleration active (`make build`).
 > 
 > Default breakdown: SRP beamforming 11.5s (8.2ms/frame) + wind noise 4.6s + bird noise 2.0s + ambient 0.5s + propagation 2.0s + misc 3.0s.
 > Without C++ extensions, expect 2–3× slower.
 
-## Dependencies
+## Setup
 
-```
-numpy>=1.24, scipy>=1.10, matplotlib>=3.7, pyyaml>=6.0
-Python >= 3.10
+```bash
+# Recommended — install using uv (reads pyproject.toml + uv.lock)
+uv sync
+
+# Alternatively, install with pip
+pip install -e .
 ```
 
-Install: `pip install -e .` (from `pyproject.toml`) or use the provided `uv.lock`.
+Dependencies: `numpy>=1.24, scipy>=1.10, matplotlib>=3.7, pyyaml>=6.0, pydantic>=2.0, streamlit>=1.40` — Python >= 3.10.
+
+All commands can be run with `uv run <cmd>` or after activating the virtual environment (`source .venv/bin/activate`).
 
 ### C++ Acceleration (optional, recommended)
 
@@ -118,7 +192,6 @@ Three modules are built:
 | Module | Path | Accelerates |
 |---|---|---|
 | `_propagate.so` | `src/cpp/propagate.cpp` | Per-sample delay+attenuation + absorption OLA |
-| `_noise.so` | `src/cpp/noise.cpp` | Wind noise Corcos frequency loop |
 | `_srp.so` | `src/cpp/srp.cpp` | SRP-PHAT beamforming (einsum hot path) |
 
 Each falls back to pure Python automatically if the `.so` is missing.

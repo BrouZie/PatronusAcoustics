@@ -44,12 +44,14 @@ class RefractionModel:
 
     def excess_attenuation(self, source_height, receiver_height,
                            distance, T0_C=20.0, u_ref=0.0, cos_theta=1.0,
-                           frequency=1000.0):
+                           frequencies=None):
         """Excess attenuation in dB from refraction.
 
         Computes an approximate excess attenuation when the source is
         in a refractive shadow zone. Downward refraction (positive gradient)
         returns 0 dB. Upward refraction returns frequency-dependent loss.
+        Accepts a scalar or array of *frequencies* (Hz) to return
+        frequency-dependent excess loss.
 
         References:
             - Attenborough et al., "Predicting Outdoor Sound" (2007)
@@ -59,7 +61,7 @@ class RefractionModel:
         z_src = max(source_height, 0.1)
 
         if z_rec <= self.roughness_length or z_src <= self.roughness_length:
-            return 0.0
+            return _zero_like(frequencies)
 
         z_mid = np.sqrt(z_rec * z_src)
 
@@ -73,28 +75,31 @@ class RefractionModel:
             dc_dz = 0.0
 
         if dc_dz >= -1e-6:
-            return 0.0
+            return _zero_like(frequencies)
 
         R_curvature = 1.0 / (-dc_dz / c_eff_mid + 1e-10)
 
         shadow_dist = np.sqrt(2.0 * R_curvature * z_src)
         if distance < shadow_dist * 0.8:
-            return 0.0
+            return _zero_like(frequencies)
 
         frac = distance / max(shadow_dist, 1.0)
-        if np.isscalar(frac):
-            if frac <= 1.0:
-                return 0.0
-        else:
-            frac = np.where(frac <= 1.0, 1.0, frac)
+        if frac <= 1.0:
+            return _zero_like(frequencies)
 
         A_frac = 1.0 - 1.0 / frac
-        if np.isscalar(A_frac):
-            if A_frac < 0:
-                A_frac = 0.0
-        else:
-            A_frac = np.where(A_frac < 0, 0.0, A_frac)
+        if A_frac < 0:
+            A_frac = 0.0
 
-        max_excess = 3.0 + 0.01 * frequency / 1000.0
-        excess = max_excess * A_frac ** 2
-        return min(excess, 15.0)
+        if frequencies is None:
+            return min((3.0 + 0.01) * A_frac ** 2, 15.0)
+
+        frequencies = np.asarray(frequencies, dtype=float)
+        max_excess = 3.0 + 0.01 * frequencies / 1000.0
+        return np.minimum(max_excess * A_frac ** 2, 15.0)
+
+
+def _zero_like(frequencies):
+    if frequencies is None:
+        return 0.0
+    return np.zeros_like(frequencies, dtype=float)

@@ -4,7 +4,7 @@ from .config import Config
 from .geometry import DualRingArray
 from .drone_signal import DroneSource
 from .srpphat import SRPPhatProcessor
-from .metrics import compute_metrics
+from .metrics import compute_metrics, compute_gate1
 from .visualize import save_summary_figures
 from .visualize_3d import create_beamsphere_animation
 from .environment import Environment
@@ -25,6 +25,16 @@ class Simulation:
         absorption = self.env.absorption if self.env.enabled else None
         refraction = self.env.refraction if self.env.enabled else None
 
+        if self.env.enabled:
+            atm = config.environment.atmospheric
+            noise_cfg = config.environment.noise
+            temp_C = atm.temperature_C
+            press_kPa = atm.pressure_kPa
+            wind_ms = noise_cfg.wind_speed_ms
+            wind_deg = noise_cfg.wind_direction_deg
+        else:
+            temp_C, press_kPa, wind_ms, wind_deg = 20.0, 101.325, 0.0, 0.0
+
         self.drone = DroneSource(
             config.drone,
             absorption=absorption,
@@ -37,6 +47,10 @@ class Simulation:
                 config.environment.turbulence.scintillation_strength
                 if self.env.enabled else 0.0
             ),
+            temperature_C=temp_C,
+            pressure_kPa=press_kPa,
+            wind_speed_ms=wind_ms,
+            wind_direction_deg=wind_deg,
         )
 
         self.srp = SRPPhatProcessor(
@@ -46,6 +60,7 @@ class Simulation:
             hop_length=config.srpphat.hop_length,
             search_config=config.srpphat.search,
             max_freq=config.srpphat.max_freq,
+            min_freq=config.srpphat.min_freq,
             mode=config.srpphat.mode,
             frequency_weight=config.srpphat.frequency_weight,
             detection_config=config.srpphat.detection,
@@ -100,6 +115,9 @@ class Simulation:
             if env_noise is not None:
                 env_noise = env_noise[:, :mic_signals.shape[1]]
                 mic_signals += env_noise
+            self._wind_dir = self.env.wind_coherence_directionality(mic_pos)
+        else:
+            self._wind_dir = None
 
         if self.env.has_ground and hasattr(self.array, "world_to_array_coords"):
             source_positions = self.array.world_to_array_coords(source_positions)
@@ -112,6 +130,9 @@ class Simulation:
         n_frames = len(frame_starts)
         center_samples = frame_starts + fft_size // 2
         timestamps = center_samples / fs
+
+        # Gate 1: band-limited RMS + spectral flatness (post-noise)
+        gate1, gate1_rms, gate1_flatness = compute_gate1(mic_signals, fs, fft_size, hop)
 
         true_doas = np.zeros((n_frames, 2))
         estimated_doas = np.full((n_frames, 2), np.nan)
@@ -148,6 +169,9 @@ class Simulation:
             "srp_maps": srp_maps,
             "peak_values": peak_values,
             "detections": detections,
+            "gate1": gate1,
+            "gate1_rms_db": gate1_rms,
+            "gate1_flatness": gate1_flatness,
             "timestamps": timestamps,
             "mic_signals": mic_signals,
             "source_positions": source_positions,
@@ -155,6 +179,7 @@ class Simulation:
             "n_frames": n_frames,
             "fs": fs,
             "frame_snrs": frame_snrs,
+            "wind_coherence_directionality": self._wind_dir,
         }
 
         print("Computing metrics...")

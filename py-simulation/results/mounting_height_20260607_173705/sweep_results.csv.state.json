@@ -1,0 +1,135 @@
+{
+  "sweep_config": "/home/brouzie/Projects/personal/PatronusAcoustics/py-simulation/config/sweep/mounting_height.yaml",
+  "started": "2026-06-07T07:37:05.851045+00:00",
+  "output_path": "/home/brouzie/Projects/personal/PatronusAcoustics/py-simulation/results/mounting_height_20260607_173705/sweep_results.csv",
+  "completed": [
+    {
+      "combo": [
+        0.3,
+        "constant"
+      ],
+      "hash": "b5b0ed462e41",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        0.3,
+        "delany_bazley"
+      ],
+      "hash": "81d94f1f4e77",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        0.5,
+        "constant"
+      ],
+      "hash": "e856efcb7eab",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        0.5,
+        "delany_bazley"
+      ],
+      "hash": "e7a795e44807",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        0.75,
+        "constant"
+      ],
+      "hash": "135f4ee236bf",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        0.75,
+        "delany_bazley"
+      ],
+      "hash": "be89bbbc0050",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        1.0,
+        "constant"
+      ],
+      "hash": "209f44aff47f",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        1.0,
+        "delany_bazley"
+      ],
+      "hash": "391fa9239f9d",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        1.5,
+        "constant"
+      ],
+      "hash": "c3b23716ac21",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        1.5,
+        "delany_bazley"
+      ],
+      "hash": "86e24baedba1",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        2.0,
+        "constant"
+      ],
+      "hash": "bc2d1c338d44",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        2.0,
+        "delany_bazley"
+      ],
+      "hash": "88e35e81964d",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        3.0,
+        "constant"
+      ],
+      "hash": "8f150ce0b897",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        3.0,
+        "delany_bazley"
+      ],
+      "hash": "0e35e30b03a5",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        5.0,
+        "constant"
+      ],
+      "hash": "8aa6b63e4737",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        5.0,
+        "delany_bazley"
+      ],
+      "hash": "e1d4eeb604ba",
+      "status": "ok"
+    }
+  ]
+}

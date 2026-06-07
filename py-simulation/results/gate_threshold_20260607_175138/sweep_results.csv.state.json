@@ -1,0 +1,151 @@
+{
+  "sweep_config": "/home/brouzie/Projects/personal/PatronusAcoustics/py-simulation/config/sweep/gate_threshold.yaml",
+  "started": "2026-06-07T07:51:38.111726+00:00",
+  "output_path": "/home/brouzie/Projects/personal/PatronusAcoustics/py-simulation/results/gate_threshold_20260607_175138/sweep_results.csv",
+  "completed": [
+    {
+      "combo": [
+        2.0,
+        20
+      ],
+      "hash": "64373f309ba1",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        2.0,
+        50
+      ],
+      "hash": "778b7db96ecf",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        2.0,
+        100
+      ],
+      "hash": "12dd21156115",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        3.0,
+        20
+      ],
+      "hash": "810d37c17f62",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        3.0,
+        50
+      ],
+      "hash": "cc36153df08b",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        3.0,
+        100
+      ],
+      "hash": "87b1eecfb75a",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        4.0,
+        20
+      ],
+      "hash": "e00cbc640919",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        4.0,
+        50
+      ],
+      "hash": "cfac8fa632fb",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        4.0,
+        100
+      ],
+      "hash": "1b643ddd13ae",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        6.0,
+        20
+      ],
+      "hash": "889825919d82",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        6.0,
+        50
+      ],
+      "hash": "81a6fe20c42d",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        6.0,
+        100
+      ],
+      "hash": "a1d5e9ea17ce",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        8.0,
+        20
+      ],
+      "hash": "2c058626b5db",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        8.0,
+        50
+      ],
+      "hash": "3b5d86d02f7e",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        8.0,
+        100
+      ],
+      "hash": "6e43678a2d5d",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        10.0,
+        20
+      ],
+      "hash": "a17aeab8a4b4",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        10.0,
+        50
+      ],
+      "hash": "df11a2e005f7",
+      "status": "ok"
+    },
+    {
+      "combo": [
+        10.0,
+        100
+      ],
+      "hash": "1e6e95ed4a73",
+      "status": "ok"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# Sweep: mounting height effect on ground reflection
+base_config: config/default.yaml
+sweep:
+  environment.ground.height_m: [0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0]
+  environment.ground.model: [constant, delany_bazley]
+overrides:
+  signal.duration: 5.0

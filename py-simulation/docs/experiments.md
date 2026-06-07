@@ -1,96 +1,145 @@
 # Experiments
 
-The parameter sweep runner (`python -m src.sweep config/sweep_<topic>.yaml`) makes it easy to run structured experiments over any config path. Each run produces a CSV with per-run aggregate metrics, ready for analysis in pandas, Excel, or your tool of choice.
+The parameter sweep runner (`python -m src.sweep config/sweep/<topic>.yaml`) makes it easy to run structured experiments over any config path. Each run produces a CSV with per-run aggregate metrics, ready for analysis in pandas, Excel, or your tool of choice.
+
+Sweep YAML files live in `config/sweep/` — see [config.md](config.md) for the format.
 
 ## Provided Sweep Configs
 
 | Config | Params | Combos | Question |
 |---|---|---|---|
-| `config/sweep_ground.yaml` | coeff × tilt | 15 | Where is the ground-reflection cliff? |
-| `config/sweep_distance.yaml` | distance × wind | 12 | What is the max reliable detection range? |
-| `config/sweep_array.yaml` | ring1_radius × n_mics | 12 | What is the minimum viable array? |
+| `config/sweep/mounting_height.yaml` | height × ground model (constant R / Delany-Bazley) | 16 | How does mounting height affect detection through ground multipath? |
+| `config/sweep/gate_threshold.yaml` | PSR threshold (2–10 dB, 3 distances) | 18 | Does PSR gate threshold limit detection range? |
+| `config/sweep/freq_band.yaml` | min_freq × max_freq | 12 | Which frequency band maximises detection rate? |
+| `config/sweep/detection_range.yaml` | source distance (10–500 m, full band) | 10 | What is the max reliable detection range (full band)? |
+| `config/sweep/detection_range_optimal.yaml` | source distance (10–500 m, 500–2000 Hz band) | 10 | What is the max reliable detection range (optimal band)? |
 
-## How to Run
+## Completed Experiments
 
-```bash
-# Run the ground sweep
-python -m src.sweep config/sweep_ground.yaml
+These are documented with full results in [design_validation.md](design_validation.md).
 
-# Preview combinations first
-python -m src.sweep config/sweep_ground.yaml --dry-run
-```
+### Mounting Height & Ground Reflection
 
-Results go to `results/{sweep_name}_{timestamp}/sweep_results.csv` by default (override with the optional `output:` key in the YAML). Each row contains the swept parameter values plus detection_rate, mean/max angular error, PSR, beamwidth, effective SNR, and wall-clock time.
+`config/sweep/mounting_height.yaml` — Height (0.3–5.0 m) × ground model (constant R=0.8 vs Delany-Bazley grass).
+
+- **Constant ground**: detection flat at 47–52% across all heights — mounting height is not a significant factor with coherent ground reflection
+- **Delany-Bazley grass**: 0% detection at all heights — physically correct grass absorption destroys beamforming coherence
+- **Practical takeaway**: design assuming absorptive ground; choose height (1.5–3.0 m) by wind noise shielding and deployment convenience, not detection performance
+
+### Frequency Band Analysis
+
+`config/sweep/freq_band.yaml` — min_freq (0–700 Hz) × max_freq (1500–3000 Hz).
+
+- Sub-300 Hz frequencies **degrade** detection (100% → 64–89%) due to wind/environmental noise
+- Optimal band: **300–2000 Hz** (100% detection, 6.1° error)
+- Recommended band: **500–2000 Hz** (rejects all wind noise, captures BPF harmonics 3–10, beamwidth 21.7°)
+
+### Detection Range
+
+`config/sweep/detection_range.yaml` and `config/sweep/detection_range_optimal.yaml` — distance 10–500 m.
+
+- Full band (0–3000 Hz): detection drops to 0% at 100 m
+- Optimal band (500–2000 Hz): **100% detection to 75 m**, 92% at 100 m, 64% at 150 m
+- **3× range improvement** from optimised band alone
+
+### Gate Threshold Tuning
+
+`config/sweep/gate_threshold.yaml` — PSR threshold 2–10 dB × distances 20/50/100 m.
+
+- PSR threshold has **negligible effect** (58–63% at 20 m, 25–29% at 50 m across all thresholds)
+- PSR distribution is bimodal: either > 10 dB or < 2 dB — the threshold is not the limiting factor
+- **6 dB** recommended as standard practice
 
 ## Experiment Ideas
 
-### 1. Detection Cliff Chart
+### 1. Array Geometry × Bandwidth Cross
 
-Run `config/sweep_ground.yaml` (5 coeff × 3 tilt = 15 runs). Plot `detection_rate` vs `coeff` for each `tilt_deg`. Expect a sharp transition between coeff=0.02 and 0.05. This quantifies the margin your deployment site needs.
-
-### 2. Frequency Weighting vs Multipath
-
-Modify a sweep config to vary `srpphat.frequency_weight` (0, 0.5, 1.0, 2.0) at a fixed coeff=0.05. Does emphasizing high frequencies improve P2M? The hypothesis: higher frequencies have shorter wavelengths, so the path-length difference spans more λ/2 cycles — some frequencies may avoid the null.
+The freq band sweep used the default dual-ring geometry (8+16 mics, 0.13/0.26 m radii). Does the optimal band change for different array sizes?
 
 ```yaml
-# config/sweep_freqweight.yaml
 base_config: config/noisy_oscillating.yaml
+overrides:
+  srpphat.min_freq: 500
 sweep:
-  srpphat.frequency_weight: [0, 0.5, 1.0, 2.0]
-output: results/sweep_freqweight.csv
+  srpphat.max_freq: [1500, 2000, 3000, 4000]
+  array.ring1_radius: [0.065, 0.13, 0.26]
+output: results/sweep_array_bandwidth.csv
 ```
 
-### 3. Trajectory × Environment Cross
+Hypothesis: Larger aperture arrays benefit from higher max_freq (better spatial resolution) while compact arrays may need a lower max_freq to avoid aliasing.
 
-Run the same environment settings (e.g., `noisy_oscillating` ground + noise) with different trajectory types:
+### 2. Atmospheric Absorption vs Range
+
+The detection range sweeps used default humidity (50%). At high frequencies and long ranges, absorption becomes significant. Sweep humidity at marginal ranges (100–200 m):
+
+```yaml
+base_config: config/sweep/detection_range_optimal.yaml
+overrides:
+  drone.distance: 150
+sweep:
+  environment.humidity_pct: [20, 50, 80, 100]
+output: results/sweep_humidity.csv
+```
+
+### 3. SNR Sweep at Fixed Range
+
+Determine the minimum SNR required for reliable detection at a given range:
+
+```yaml
+base_config: config/noisy_oscillating.yaml
+overrides:
+  drone.distance: 100
+  srpphat.min_freq: 500
+  srpphat.max_freq: 2000
+sweep:
+  signal.snr_db: [5, 10, 15, 20, 25, 30]
+output: results/sweep_snr.csv
+```
+
+### 4. Trajectory × Environment Cross
+
+Does the oscillating trajectory (varying distance) give a different aggregate detection rate than a fixed-distance arc or a linear flyby?
 
 ```yaml
 base_config: config/default.yaml
 overrides:
-  environment: {enabled: true, ... fixed env ...}
+  environment: {enabled: true}
 sweep:
   drone.trajectory.type: ["arc", "oscillating", "flyby"]
 output: results/sweep_trajectory.csv
 ```
 
-Does the oscillating trajectory (varying distance) give a different aggregate detection rate than the arc (constant distance)?
+### 5. Random Array vs Dual-Ring
 
-### 4. Tilt Angle as a Mitigation Tool
-
-Vary `ground.tilt_deg` from 0 to 45° at a fixed, punishing coeff=0.10. Some tilt angles may shift the comb-filter nulls away from the BPF harmonics:
+Compare the baseline dual-ring with randomly-placed mics (same count) to test whether the concentric ring geometry is optimal:
 
 ```yaml
 base_config: config/noisy_oscillating.yaml
+# Requires a new array type in geometry.py
 sweep:
-  ground.tilt_deg: [0, 5, 10, 15, 20, 25, 30, 45]
-output: results/sweep_tilt.csv
+  array.type: ["dual_ring", "random", "spiral"]
+output: results/sweep_array_type.csv
 ```
 
-### 5. Array Size vs. Ground Robustness
+### 6. Windscreen Directionality Validation
 
-Using `config/sweep_array.yaml` (or extended), determine whether more mics or larger aperture provides more tolerance to ground reflection. Plot `detection_rate` vs `n_mics_ring1` for each `ring1_radius`.
-
-### 6. Manual SNR vs. EIN-Derived
-
-Compare results with `signal.snr_db: 25` (old manual default) vs `snr_db: null` (EIN-derived, ~17.5 dB at 15m) across the ground sweep. This shows the cost of using the physically correct noise floor vs the previously assumed one.
-
-### 7. All Noise Sources On/Off
-
-Isolate each noise source by varying which is enabled:
+Quantify the wind noise asymmetry from a one-sided windscreen by comparing forward vs rear-mic coherence at various wind speeds. The current simulation assumes symmetric wind noise. A windscreen effect could be modelled by reducing wind amplitude on the rear half of mics:
 
 ```yaml
 base_config: config/noisy_oscillating.yaml
-# Create variants that disable each source individually
+overrides:
+  noise.wind_speed_ms: 5.0
 sweep:
-  noise.wind_speed_ms: [0, 1.5]
-  noise.bird_activity: [0, 0.10]
-  noise.ambient_db: [0, 10]
-output: results/sweep_noise_breakdown.csv
+  noise.wind_shielding_db: [0, 3, 6, 10]
+output: results/sweep_windscreen.csv
 ```
+
+Requires adding a `wind_shielding_db` parameter to the noise config.
 
 ## Analysis Tips
 
 - **Detection rate** is your primary metric. Everything else (angular error, PSR) only matters on detected frames.
 - **Mean angular error** on detected frames may be artificially low when only high-SNR frames pass the gate. Compare with raw (ungated) error for the full picture.
-- **Run time** scales roughly linearly with `duration × (1/resolution²) × (max_freq / fs) × n_mics`. The benchmark config runs in ~0.5s; a full 15s/2°/4kHz run takes ~36s.
+- **Run time** scales roughly linearly with `duration × (1/resolution²) × (max_freq / fs) × n_mics`. The benchmark config runs in ~0.3s; a full 15s/2°/4kHz run takes ~24s.
 - **Statistical variation**: The simulation is deterministic given the same config. To assess variance, use `signal.snr_db` manual override and sweep `noise.wind_speed_ms` with small variations to see sensitivity.
+- **Optimal band** (500–2000 Hz) should be the default for any realistic assessment; full-band (0–3000 Hz) results are significantly pessimistic.

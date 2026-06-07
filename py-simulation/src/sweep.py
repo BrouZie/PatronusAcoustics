@@ -19,7 +19,6 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,15 +85,26 @@ def _config_hash(config):
     return hashlib.sha256(raw).hexdigest()[:12]
 
 
+def _nested_overrides(overrides):
+    """Convert flat dotted-key overrides to nested dicts."""
+    result = {}
+    for ok, ov in overrides.items():
+        if '.' in str(ok):
+            deep_merge(result, parse_dotted_key(str(ok), ov))
+        else:
+            result[ok] = ov
+    return result
+
+
 def _run_combo(keys, combo, base_dict, overrides):
-    """Execute a single sweep combination (runs in worker process)."""
+    """Execute a single sweep combination."""
     try:
         combo_nested = {}
         for k, v in zip(keys, combo):
             deep_merge(combo_nested, parse_dotted_key(k, v))
 
         d = copy.deepcopy(base_dict)
-        deep_merge(d, overrides)
+        deep_merge(d, _nested_overrides(overrides))
         deep_merge(d, combo_nested)
         config = Config.from_dict(d)
 
@@ -212,7 +222,7 @@ def main(argv=None):
         for k, v in zip(keys, combo):
             deep_merge(combo_nested, parse_dotted_key(k, v))
         d = copy.deepcopy(base_dict)
-        deep_merge(d, overrides)
+        deep_merge(d, _nested_overrides(overrides))
         deep_merge(d, combo_nested)
         config = Config.from_dict(d)
         h = _config_hash(config)
@@ -235,17 +245,14 @@ def main(argv=None):
     fieldnames = list(keys) + METRIC_FIELDS
     is_new = not out.exists()
 
-    # If new or not resuming, write header
     if is_new or not args.resume:
         with open(out, "w", newline="") as f:
             import csv
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
     else:
-        # Append mode — no header
         pass
 
-    # Initialize state
     if args.resume and state_path.exists():
         with open(state_path) as f:
             state = json.load(f)
@@ -257,54 +264,38 @@ def main(argv=None):
             "completed": [],
         }
 
-    num_workers = args.workers or os.cpu_count() or 1
-    num_workers = min(num_workers, len(pending))
-    if num_workers < 1:
-        num_workers = 1
-
-    print(f"Using {num_workers} worker(s)")
+    print(f"Processing {len(pending)} combination(s) sequentially")
 
     total_pending = len(pending)
     results = []
 
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = {}
-        for combo in pending:
-            future = executor.submit(_run_combo, keys, combo, copy.deepcopy(base_dict), overrides)
-            futures[future] = combo
+    for done_count, combo in enumerate(pending, 1):
+        try:
+            row = _run_combo(keys, combo, copy.deepcopy(base_dict), overrides)
+        except Exception as e:
+            row = {"_error": str(e), "_combo": combo}
 
-        done_count = 0
-        for future in as_completed(futures):
-            combo = futures[future]
-            done_count += 1
-            try:
-                row = future.result(timeout=7200)
-            except Exception as e:
-                row = {"_error": str(e), "_combo": combo}
+        if "_error" in row:
+            tags = ", ".join(f"{k}={_fmt(v)}" for k, v in zip(keys, combo))
+            print(f"[{done_count}/{total_pending}] FAILED {tags}: {row['_error']}")
+            continue
 
-            if "_error" in row:
-                tags = ", ".join(f"{k}={_fmt(v)}" for k, v in zip(keys, combo))
-                print(f"[{done_count}/{total_pending}] FAILED {tags}: {row['_error']}")
-                continue
+        tags = ", ".join(f"{k}={_fmt(v)}" for k, v in row.items() if k in keys)
+        det_str = f"{row['detection_rate']:.0%}" if row.get('n_total', 0) > 0 else "N/A"
+        err_str = f"{row.get('mean_angular_error_deg', 0):.1f}°" if row.get('mean_angular_error_deg') is not None else "N/A"
+        print(f"[{done_count}/{total_pending}] {tags}  det={det_str}  err={err_str}  {row.get('run_time_s', 0):.1f}s")
 
-            tags = ", ".join(f"{k}={_fmt(v)}" for k, v in row.items() if k in keys)
-            det_str = f"{row['detection_rate']:.0%}" if row.get('n_total', 0) > 0 else "N/A"
-            err_str = f"{row.get('mean_angular_error_deg', 0):.1f}°" if row.get('mean_angular_error_deg') is not None else "N/A"
-            print(f"[{done_count}/{total_pending}] {tags}  det={det_str}  err={err_str}  {row.get('run_time_s', 0):.1f}s")
+        with open(out, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writerow({k: row.get(k) for k in fieldnames})
 
-            # Append row to CSV
-            with open(out, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writerow({k: row.get(k) for k in fieldnames})
+        h = row.get("config_hash", "")
+        combo_values = [row.get(k) for k in keys]
+        state["completed"].append({"combo": combo_values, "hash": h, "status": "ok"})
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
 
-            # Update state
-            h = row.get("config_hash", "")
-            combo_values = [row.get(k) for k in keys]
-            state["completed"].append({"combo": combo_values, "hash": h, "status": "ok"})
-            with open(state_path, "w") as f:
-                json.dump(state, f, indent=2)
-
-            results.append(row)
+        results.append(row)
 
     print(f"\nResults → {out.resolve()}")
     print(f"\n=== Sweep Complete: {len(results)}/{total_pending} successful ===")

@@ -1,7 +1,9 @@
-# Sweep: detection range with all realism features
+# Sweep: detection range with optimal freq band (500-2000 Hz)
 base_config: config/default.yaml
 sweep:
   drone.distance: [10, 20, 30, 50, 75, 100, 150, 200, 300, 500]
 overrides:
   signal.duration: 5.0
   environment.ground.height_m: 1.5
+  srpphat.min_freq: 500
+  srpphat.max_freq: 2000

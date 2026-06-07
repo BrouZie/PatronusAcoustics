@@ -14,13 +14,15 @@ except ImportError:
 class SRPPhatProcessor:
     def __init__(self, array: DualRingArray, fs: int, fft_size: int,
                  hop_length: int, search_config, max_freq: float = 4000.0,
-                 mode: str = "phat", frequency_weight: float = 0.0,
+                 min_freq: float = 0.0, mode: str = "phat",
+                 frequency_weight: float = 0.0,
                  detection_config=None):
         self.array = array
         self.fs = fs
         self.fft_size = fft_size
         self.hop_length = hop_length
         self.max_freq = max_freq
+        self.min_freq = min_freq
         self.mode = mode
         self.frequency_weight = frequency_weight
         self.detection = detection_config
@@ -41,7 +43,7 @@ class SRPPhatProcessor:
         # Shape: (n_mics, n_directions)
 
         self.freqs = np.fft.rfftfreq(self.fft_size, 1.0 / self.fs)
-        self.freq_mask = self.freqs <= self.max_freq
+        self.freq_mask = (self.freqs >= self.min_freq) & (self.freqs <= self.max_freq)
         self.freqs_used = self.freqs[self.freq_mask]
         self.n_freqs_used = len(self.freqs_used)
         self.window = get_window("hann", self.fft_size)

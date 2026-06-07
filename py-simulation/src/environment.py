@@ -4,12 +4,6 @@ from scipy.signal import butter, sosfilt
 from .absorption import AtmosphericAbsorption
 from .refraction import RefractionModel
 
-try:
-    from . import _noise
-    _HAS_CPP_NOISE = True
-except ImportError:
-    _HAS_CPP_NOISE = False
-
 RHO0 = 1.2
 C0 = 343.0
 
@@ -109,7 +103,8 @@ class WindSource:
         self.n_mics = n_mics
         self.n_samples = n_samples
         self.array_center = np.array(array_center, dtype=float)
-        self.alpha = 0.15  # Corcos constant
+        self.alpha_xi = 0.15   # streamwise Corcos decay
+        self.alpha_eta = 0.75  # cross-stream Corcos decay (~5× larger)
 
     def generate(self, mic_positions):
         n = self.n_samples
@@ -119,11 +114,18 @@ class WindSource:
         freqs = np.fft.fftfreq(n_pad, 1 / self.fs)
         pos_idx = np.where(freqs > 0)[0]
 
-        # Mic pairwise distances (for coherence)
-        dists = np.zeros((n_mics, n_mics))
+        # Directional separation: project mic pairs onto wind direction
+        wind_az = np.deg2rad(self.direction_deg)
+        wind_vec = np.array([np.cos(wind_az), np.sin(wind_az), 0.0])
+
+        xi = np.zeros((n_mics, n_mics))   # streamwise separation
+        eta = np.zeros((n_mics, n_mics))  # cross-stream separation magnitude
         for i in range(n_mics):
             for j in range(n_mics):
-                dists[i, j] = np.linalg.norm(mic_positions[i] - mic_positions[j])
+                sep = mic_positions[i] - mic_positions[j]
+                proj = np.dot(sep, wind_vec)
+                xi[i, j] = proj
+                eta[i, j] = np.linalg.norm(sep - proj * wind_vec)
 
         # Spectral envelope: brown noise (1/f) with LPF at 500 Hz
         env = np.ones(n_pad, dtype=float)
@@ -148,27 +150,21 @@ class WindSource:
 
         U = max(self.speed_ms, 0.1)
 
-        if _HAS_CPP_NOISE:
-            _noise.generate_wind_frequencies(
-                np.ascontiguousarray(dists, dtype=np.float64),
-                np.ascontiguousarray(freqs, dtype=np.float64),
-                np.ascontiguousarray(env, dtype=np.float64),
-                np.ascontiguousarray(pos_idx, dtype=np.int64),
-                self.alpha, U, n_mics,
-                np.random.randint(0, 2**32, dtype=np.int64),
-                X_fft,
+        # Directional Corcos coherence model
+        for idx in pos_idx:
+            f = freqs[idx]
+            Gamma = (
+                np.exp(-self.alpha_xi * f * np.abs(xi) / U
+                       - self.alpha_eta * f * eta / U)
+                * np.exp(1j * 2 * np.pi * f * xi / U)
             )
-        else:
-            for idx in pos_idx:
-                f = freqs[idx]
-                Gamma = np.exp(-self.alpha * f * dists / U)
-                Gamma += 1e-8 * np.eye(n_mics)
-                try:
-                    L = np.linalg.cholesky(Gamma)
-                except np.linalg.LinAlgError:
-                    L = np.eye(n_mics)
-                Z = (np.random.randn(n_mics) + 1j * np.random.randn(n_mics)) / np.sqrt(2)
-                X_fft[:, idx] = L @ Z * env[idx]
+            Gamma += 1e-8 * np.eye(n_mics)
+            try:
+                L = np.linalg.cholesky(Gamma)
+            except np.linalg.LinAlgError:
+                L = np.eye(n_mics)
+            Z = (np.random.randn(n_mics) + 1j * np.random.randn(n_mics)) / np.sqrt(2)
+            X_fft[:, idx] = L @ Z * env[idx]
 
         # Negative frequencies (conjugate symmetric) — vectorised numpy
         neg_cols = (n_pad - pos_idx).astype(int)
@@ -352,3 +348,82 @@ class Environment:
         if self._ambient_source is not None:
             total += self._ambient_source.generate()
         return total
+
+    def wind_coherence_directionality(self, mic_positions, freqs_hz=None):
+        """Mean adjacent-pair Corcos coherence for forward vs rear mics.
+
+        Only adjacent (same-ring azimuth-neighbor) pairs are included,
+        giving a representative measure of wind-induced decorrelation
+        at the scale of the closest mic spacing.
+
+        Without windscreen shielding, forward and rear coherence should
+        be symmetric for a given separation — this provides the baseline.
+
+        Parameters
+        ----------
+        mic_positions : ndarray (n_mics, 3)
+        freqs_hz : list or None
+            Frequencies to evaluate at (default [200, 500, 1000, 2000]).
+
+        Returns
+        -------
+        result : dict
+            "forward_coherence" : ndarray, mean coherence per frequency
+            "rear_coherence" : ndarray
+            "freqs_hz" : ndarray
+        """
+        if self._wind_source is None:
+            return None
+        ws = self._wind_source
+        if freqs_hz is None:
+            freqs_hz = [200, 500, 1000, 2000]
+
+        wind_az = np.deg2rad(ws.direction_deg)
+        wind_vec = np.array([np.cos(wind_az), np.sin(wind_az), 0.0])
+        n_mics = len(mic_positions)
+        U = max(ws.speed_ms, 0.1)
+
+        # Group mics by ring (small vs large radius) using median split
+        radii = np.linalg.norm(mic_positions[:, :2], axis=1)
+        r_median = np.median(radii)
+        inner_idx = np.where(radii < r_median)[0]
+        outer_idx = np.where(radii >= r_median)[0]
+        ring_groups = []
+        for idx in [inner_idx, outer_idx]:
+            az = np.arctan2(mic_positions[idx, 1], mic_positions[idx, 0])
+            ring_groups.append(idx[np.argsort(az)])
+
+        wind_proj = mic_positions @ wind_vec
+        is_forward = wind_proj > 0
+        is_rear = wind_proj < 0
+
+        fwd_coh = []
+        rear_coh = []
+
+        for f in freqs_hz:
+            fwd_vals = []
+            rear_vals = []
+            for ring_idx in ring_groups:
+                n_ring = len(ring_idx)
+                for k in range(n_ring):
+                    i = ring_idx[k]
+                    j = ring_idx[(k + 1) % n_ring]
+                    sep = mic_positions[i] - mic_positions[j]
+                    proj = np.dot(sep, wind_vec)
+                    eta = np.linalg.norm(sep - proj * wind_vec)
+                    gamma = float(np.exp(
+                        -ws.alpha_xi * f * abs(proj) / U
+                        - ws.alpha_eta * f * eta / U
+                    ))
+                    if is_forward[i] and is_forward[j]:
+                        fwd_vals.append(gamma)
+                    elif is_rear[i] and is_rear[j]:
+                        rear_vals.append(gamma)
+            fwd_coh.append(float(np.mean(fwd_vals)) if fwd_vals else 0.0)
+            rear_coh.append(float(np.mean(rear_vals)) if rear_vals else 0.0)
+
+        return {
+            "forward_coherence": np.array(fwd_coh),
+            "rear_coherence": np.array(rear_coh),
+            "freqs_hz": np.array(freqs_hz),
+        }

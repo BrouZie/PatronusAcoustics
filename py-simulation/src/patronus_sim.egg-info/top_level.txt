@@ -12,5 +12,6 @@ simulation
 srpphat
 sweep
 trajectory
+viewer
 visualize
 visualize_3d

@@ -6,15 +6,15 @@ What the simulation captures faithfully, where it simplifies, and when to trust 
 
 - **Ground reflection via image source** — Standard acoustics technique. Phase inversion (pressure-release boundary), time delay, and 1/r attenuation are physically correct. Mast-mounted arrays on hard surfaces genuinely experience this comb-filter effect.
 
-- **Frequency-dependent ground impedance (Delany-Bazley)** — The reflection coefficient now varies with frequency and incidence angle via the Delany-Bazley porous ground model. Configurable flow resistivity (σ = 200 kPa·s/m² for grass, 20 MPa·s/m² for asphalt, 30 kPa·s/m² for snow). This replaces the old constant-coefficient approximation and captures realistic frequency-dependent comb filtering.
+- **Frequency-dependent ground impedance (Delany-Bazley)** — The reflection coefficient varies with frequency and incidence angle via the Delany-Bazley porous ground model. The incidence angle is computed per-microphone from the image-source geometry (grazing vs. normal), not hardcoded to normal incidence. Configurable flow resistivity (σ = 200 kPa·s/m² for grass, 20 MPa·s/m² for asphalt, 30 kPa·s/m² for snow).
 
 - **ISO 9613-1 atmospheric absorption** — Frequency-dependent air absorption α(f, T, RH, P) per ISO 9613-1 / ANSI S1.26-1995. Applied in the frequency-domain propagation pipeline. Attenuates high-frequency drone harmonics preferentially (~0.6 dB/100m at 1 kHz, ~3 dB/100m at 8 kHz, 20°C, 50% RH). This is the dominant range-limiting physics for acoustic detection beyond ~50 m.
 
-- **Atmospheric refraction (effective sound speed)** — Logarithmic wind profile + linear temperature lapse rate → effective sound speed gradient. Upward refraction (daytime, downwind) creates shadow zones with excess attenuation up to ~6 dB. Downward refraction (nighttime, upwind) returns 0 dB excess. Modeled via curvature radius and shadow boundary calculation.
+- **Atmospheric refraction (effective sound speed)** — Logarithmic wind profile + linear temperature lapse rate → effective sound speed gradient. Upward refraction (daytime, downwind) creates shadow zones with excess attenuation up to ~6 dB. Downward refraction (nighttime, upwind) returns 0 dB excess. Modeled via curvature radius and shadow boundary calculation, then applied as a frequency-dependent pressure filter in the propagation pipeline alongside absorption.
 
 - **Directional noise sources** — Real wind, traffic, and birds arrive from specific directions, not isotropically. Modeling them as point sources (or a Corcos distributed field for wind) creates spatially-correlated mic signals that stress the beamformer realistically.
 
-- **Corcos wind coherence** — The frequency-dependent spatial correlation of wind turbulence at the microphone array is well-modeled by the Corcos formulation for atmospheric surface-layer turbulence. The Cholesky decomposition correctly generates a random field with the prescribed coherence matrix.
+- **Corcos wind coherence (directional)** — The frequency-dependent spatial correlation of wind turbulence is modeled via the full directional Corcos formulation: streamwise separation (α_ξ = 0.15), cross-stream separation (α_η = 0.75, ~5× larger decay), and a frozen-turbulence advection phase term exp(i·2π·f·ξ/U). The Cholesky decomposition correctly generates a random field with the prescribed complex coherence matrix. Mics aligned with the wind have higher coherence than mics perpendicular to it, matching real atmospheric surface-layer turbulence.
 
 - **EIN-based SNR** — Microphone self-noise is a physical floor. The ICS-52000's 29 dBA EIN sets the minimum detectable signal. Using `94 − snr_dba` to derive noise power is the standard electroacoustic approach.
 
@@ -54,7 +54,7 @@ What the simulation captures faithfully, where it simplifies, and when to trust 
 | ICS-52000 HPF @ 75 Hz | −0.8 dB | ~99% → ~95% (no ground) |
 | EIN-derived SNR (17.5 vs 25 dB) | −0.2 dB | ~96% → ~95% (no ground) |
 | ISO 9613-1 absorption (20°C, 50% RH, 100m) | Frequency-dependent | Suppresses high harmonics at range |
-| Refraction shadow zone (upwind, 200m) | 1–6 dB excess loss | Reduces detection at long range |
+| Refraction shadow zone (upwind, 200m) | 1–6 dB excess loss (now wired into signal chain) | Reduces detection at long range |
 | Delany-Bazley ground vs constant coeff | Varies with θ, f | More nuanced than sharp cliff |
 | Wind 10 m/s | −0.2 dB | Negligible |
 | Turbulence 15 μs | −0.1 dB | Negligible |
@@ -71,9 +71,10 @@ What the simulation captures faithfully, where it simplifies, and when to trust 
 | Ground-free, high SNR | High | Well-understood physics, array gain dominates |
 | Moderate ground (coeff ≤ 0.05) | Medium | Physics is correct but real ground varies |
 | Strong ground (coeff ≥ 0.10) | Low | Detection collapse is real, but the exact coefficient is site-dependent |
-| Delany-Bazley ground | Medium | Frequency-dependent impedance is more accurate; flow resistivity is an estimate |
-| Wind noise | High | Corcos model is well-validated for outdoor arrays |
+| Delany-Bazley ground | Medium-High | Frequency-dependent impedance with per-mic incidence angle from image-source geometry; flow resistivity is an estimate |
+| Wind noise (directional Corcos) | Medium-High | Streamwise/cross-stream coherence (α_ξ=0.15, α_η=0.75) with frozen-turbulence phase; Cholesky-generated random field is exact |
 | Traffic / birds | Medium | Directional propagation is correct; real sources are more complex |
+| Refraction shadow zone | Medium-High | ISO 9613-2 model wired into propagation pipeline alongside absorption; verified for consistency |
 | Short-to-medium range (< 200 m) | Medium-High | Absorption + refraction + turbulence modeled per standards |
 | Long range (200–500 m) | Medium | Absorption and refraction are correct; terrain/obstacles not modeled |
 | Precipitation | None | Not modeled at all |
