@@ -7,6 +7,91 @@
 
 namespace py = pybind11;
 
+/* ── Windowed-sinc fractional delay ──────────────────────────────────────
+ *
+ * 16-tap Kaiser (β = 8.6) sinc interpolator, mirroring drone_signal.py
+ * exactly (same I0 power series, same tap layout) so the Python fallback
+ * and this extension agree to ~1e-15. Keep both in sync.
+ */
+
+static const int SINC_TAPS = 16;
+static const double KAISER_BETA = 8.6;
+
+static double bessel_i0(double x) {
+    /* Same power series as drone_signal._i0 — NOT std::cyl_bessel_i,
+     * whose rounding differs from the Python-side series. */
+    double half2 = (x / 2.0) * (x / 2.0);
+    double term = 1.0, total = 1.0;
+    for (int k = 1; k < 60; ++k) {
+        term *= half2 / ((double)k * (double)k);
+        total += term;
+        if (term < 1e-18 * total) break;
+    }
+    return total;
+}
+
+static const double I0_BETA = bessel_i0(KAISER_BETA);
+
+static inline double sinc_kernel(double x) {
+    const double half = SINC_TAPS / 2.0;
+    if (std::abs(x) > half) return 0.0;
+    double arg = 1.0 - (x / half) * (x / half);
+    if (arg < 0.0) arg = 0.0;
+    double window = bessel_i0(KAISER_BETA * std::sqrt(arg)) / I0_BETA;
+    double s = (x == 0.0) ? 1.0 : std::sin(M_PI * x) / (M_PI * x);
+    return s * window;
+}
+
+/* Retarded emission time: fixed-point iterations of t_e = t − d(t_e)/c,
+ * mirroring drone_signal._retarded_distances (three passes; position is
+ * linearly interpolated and edge-clamped exactly like np.interp). */
+static const int RETARDED_TIME_ITERS = 3;
+
+template <typename Acc>
+static double retarded_distance(
+    const Acc& pos, int n_work,
+    double mx, double my, double mz,
+    int i, double fs, double speed_sound
+) {
+    double dx = mx - pos(i, 0);
+    double dy = my - pos(i, 1);
+    double dz = mz - pos(i, 2);
+    double d = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+    for (int it = 0; it < RETARDED_TIME_ITERS; ++it) {
+        double t_e = (double)i - d / speed_sound * fs;
+        double px, py_, pz;
+        if (t_e <= 0.0) {
+            px = pos(0, 0); py_ = pos(0, 1); pz = pos(0, 2);
+        } else if (t_e >= (double)(n_work - 1)) {
+            px = pos(n_work - 1, 0); py_ = pos(n_work - 1, 1);
+            pz = pos(n_work - 1, 2);
+        } else {
+            int j = (int)std::floor(t_e);
+            double frac = t_e - (double)j;
+            px  = (1.0 - frac) * pos(j, 0) + frac * pos(j + 1, 0);
+            py_ = (1.0 - frac) * pos(j, 1) + frac * pos(j + 1, 1);
+            pz  = (1.0 - frac) * pos(j, 2) + frac * pos(j + 1, 2);
+        }
+        dx = mx - px; dy = my - py_; dz = mz - pz;
+        d = std::sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    return d;
+}
+
+template <typename Acc>
+static double sinc_read(const Acc& src, int n, double read_pos) {
+    int idx_int = (int)std::floor(read_pos);
+    double frac = read_pos - (double)idx_int;
+    double acc = 0.0;
+    for (int o = -SINC_TAPS / 2 + 1; o <= SINC_TAPS / 2; ++o) {
+        int s = idx_int + o;
+        if (s < 0 || s >= n) continue;
+        acc += sinc_kernel(frac - (double)o) * src(s);
+    }
+    return acc;
+}
+
 /* ── Direct-path propagation (moving source, per-sample) ─────────────── */
 
 py::array_t<double> propagate_moving(
@@ -35,25 +120,15 @@ py::array_t<double> propagate_moving(
             res(m, j) = 0.0;
 
     for (int i = 0; i < n_work; ++i) {
-        double px = pos(i, 0), py = pos(i, 1), pz = pos(i, 2);
-
         for (int m = 0; m < n_mics; ++m) {
-            double dx = mic(m, 0) - px;
-            double dy = mic(m, 1) - py;
-            double dz = mic(m, 2) - pz;
-            double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+            double dist = retarded_distance(
+                pos, n_work, mic(m, 0), mic(m, 1), mic(m, 2),
+                i, fs, speed_sound);
             double atten = 1.0 / (dist + 1e-6);
 
             double delay = dist / speed_sound + turb(m, i);
-            double delay_samp = delay * fs;
-            double idx_float = (double)i - delay_samp;
-            int idx_int = (int)std::floor(idx_float);
-            double frac = idx_float - (double)idx_int;
-
-            if (idx_int >= 0 && idx_int < n - 1) {
-                double val = (1.0 - frac) * src(idx_int) + frac * src(idx_int + 1);
-                res(m, i) = atten * val;
-            }
+            double read_pos = (double)i - delay * fs;
+            res(m, i) = atten * sinc_read(src, n, read_pos);
         }
     }
 
@@ -94,32 +169,17 @@ py::array_t<double> propagate_reflected_moving(
     double R = reflection_coefficient;
 
     for (int i = 0; i < n_work; ++i) {
-        double px = pos(i, 0), py = pos(i, 1), pz = pos(i, 2);
-        double ix = img(i, 0), iy = img(i, 1), iz = img(i, 2);
-
         for (int m = 0; m < n_mics; ++m) {
-            double dx_d = mic(m, 0) - px;
-            double dy_d = mic(m, 1) - py;
-            double dz_d = mic(m, 2) - pz;
-            double dist_direct = std::sqrt(dx_d*dx_d + dy_d*dy_d + dz_d*dz_d);
+            double dist_image = retarded_distance(
+                img, n_work, mic(m, 0), mic(m, 1), mic(m, 2),
+                i, fs, speed_sound);
 
-            double dx_i = mic(m, 0) - ix;
-            double dy_i = mic(m, 1) - iy;
-            double dz_i = mic(m, 2) - iz;
-            double dist_image = std::sqrt(dx_i*dx_i + dy_i*dy_i + dz_i*dz_i);
-
-            double atten = R * dist_direct / (dist_image + 1e-6);
+            /* Image-source amplitude R/d_image (see drone_signal.py). */
+            double atten = R / (dist_image + 1e-6);
 
             double delay = dist_image / speed_sound + turb(m, i) * 0.5;
-            double delay_samp = delay * fs;
-            double idx_float = (double)i - delay_samp;
-            int idx_int = (int)std::floor(idx_float);
-            double frac = idx_float - (double)idx_int;
-
-            if (idx_int >= 0 && idx_int < n - 1) {
-                double val = (1.0 - frac) * src(idx_int) + frac * src(idx_int + 1);
-                res(m, i) = -atten * val;
-            }
+            double read_pos = (double)i - delay * fs;
+            res(m, i) = -atten * sinc_read(src, n, read_pos);
         }
     }
 
@@ -206,16 +266,17 @@ py::array_t<double> apply_absorption_ola(
 
 PYBIND11_MODULE(_propagate, m) {
     m.doc() = "C++ accelerated drone signal propagation routines";
+    m.attr("SINC_TAPS") = SINC_TAPS;  // feature flag checked by drone_signal
     m.def("propagate_moving", &propagate_moving,
           py::arg("source"), py::arg("mic_positions"), py::arg("positions"),
           py::arg("fs"), py::arg("speed_sound"), py::arg("turbulence"),
-          "Per-sample direct-path propagation with linear interpolation.");
+          "Per-sample direct-path propagation, windowed-sinc interpolation.");
     m.def("propagate_reflected_moving", &propagate_reflected_moving,
           py::arg("source"), py::arg("mic_positions"),
           py::arg("positions"), py::arg("image_positions"),
           py::arg("fs"), py::arg("speed_sound"),
           py::arg("turbulence"), py::arg("reflection_coefficient"),
-          "Per-sample reflected-path propagation with linear interpolation.");
+          "Per-sample reflected-path propagation, windowed-sinc interpolation.");
     m.def("apply_absorption_ola", &apply_absorption_ola,
           py::arg("mic_signals"), py::arg("distances"),
           py::arg("fs"), py::arg("alpha_coeffs"),

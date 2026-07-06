@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.signal import get_window
 
-from .geometry import DualRingArray
+from .constants import EPS_NORM
+from .geometry import ArrayGeometry, direction_vectors
 from .metrics import peak_to_sidelobe_ratio
 
 try:
@@ -12,7 +13,7 @@ except ImportError:
 
 
 class SRPPhatProcessor:
-    def __init__(self, array: DualRingArray, fs: int, fft_size: int,
+    def __init__(self, array: ArrayGeometry, fs: int, fft_size: int,
                  hop_length: int, search_config, max_freq: float = 4000.0,
                  min_freq: float = 0.0, mode: str = "phat",
                  frequency_weight: float = 0.0,
@@ -37,8 +38,11 @@ class SRPPhatProcessor:
         self.n_az = len(self.az_range)
         self.n_el = len(self.el_range)
         self.n_directions = self.n_az * self.n_el
+        # Az axis wraps when the grid spans the full circle (sidelobe
+        # exclusion must not count a peak's own wrapped mainlobe).
+        self.wrap_az = (az_max - az_min) >= 360.0 - search_config.resolution_deg
 
-        directions = DualRingArray.direction_vectors(self.az_grid, self.el_grid)
+        directions = direction_vectors(self.az_grid, self.el_grid)
         self.steering_delays = array.get_steering_delays(directions)
         # Shape: (n_mics, n_directions)
 
@@ -63,10 +67,14 @@ class SRPPhatProcessor:
 
         # Precompute phase tensor: phase[f, m, d] = exp(-j * ω_f * delay[m, d])
         # This replaces the per-frequency phase computation in the inner loop.
+        # complex64 halves memory (a full-sphere grid at 2° is ~16k directions);
+        # the C++ extension expects complex128, so only downcast on the numpy path.
         omegas = 2 * np.pi * self.freqs_used
         self.phase = np.exp(
             -1j * omegas[:, None, None] * self.steering_delays[None, :, :]
         )
+        if not _HAS_CPP_SRP:
+            self.phase = self.phase.astype(np.complex64)
         # Shape: (n_freqs, n_mics, n_directions)
 
     @property
@@ -79,7 +87,7 @@ class SRPPhatProcessor:
         X = X[:, self.freq_mask]
 
         if self.mode == "phat":
-            X_used = X / (np.abs(X) + 1e-10)
+            X_used = X / (np.abs(X) + EPS_NORM)
         else:
             X_used = X
 
@@ -98,10 +106,10 @@ class SRPPhatProcessor:
         detected = True
         if self.detection is not None and self.detection.enabled:
             if self.detection.method == "psr":
-                psr = peak_to_sidelobe_ratio(srp_map)
+                psr = peak_to_sidelobe_ratio(srp_map, wrap_az=self.wrap_az)
                 detected = psr >= self.detection.psr_threshold_db
             elif self.detection.method == "peak_to_mean":
-                p2m = 10 * np.log10(np.max(srp) / (np.mean(srp) + 1e-10))
+                p2m = 10 * np.log10(np.max(srp) / (np.mean(srp) + EPS_NORM))
                 detected = p2m >= self.detection.peak_to_mean_threshold_db
 
         doa = np.array([peak_az, peak_el]) if detected else np.array([np.nan, np.nan])

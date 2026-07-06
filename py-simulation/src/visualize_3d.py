@@ -43,13 +43,17 @@ def create_beamsphere_animation(results, config, array, srp_processor):
     norm = Normalize(vmin=0, vmax=1)
 
     pos = array.positions
-    ring_angles = np.linspace(0, 2 * np.pi, 100)
-    ring1 = (array.ring1_radius * np.cos(ring_angles),
+    rings = []
+    if hasattr(array, "ring1_radius"):
+        ring_angles = np.linspace(0, 2 * np.pi, 100)
+        rings = [
+            (array.ring1_radius * np.cos(ring_angles),
              array.ring1_radius * np.sin(ring_angles),
-             -array.ring_spacing / 2 * np.ones_like(ring_angles))
-    ring2 = (array.ring2_radius * np.cos(ring_angles),
+             -array.ring_spacing / 2 * np.ones_like(ring_angles)),
+            (array.ring2_radius * np.cos(ring_angles),
              array.ring2_radius * np.sin(ring_angles),
-             array.ring_spacing / 2 * np.ones_like(ring_angles))
+             array.ring_spacing / 2 * np.ones_like(ring_angles)),
+        ]
 
     def update(frame):
         for ax in [ax_beam, ax_srp, ax_track]:
@@ -76,7 +80,7 @@ def create_beamsphere_animation(results, config, array, srp_processor):
         ax_beam.scatter(pos[:, 0], pos[:, 1], pos[:, 2],
                         c="#1f77b4", s=80, edgecolors="white", linewidths=1.5,
                         zorder=12, label="Mics")
-        for rx, ry, rz in [ring1, ring2]:
+        for rx, ry, rz in rings:
             ax_beam.plot(rx, ry, rz, "gray", alpha=0.4, linewidth=2, zorder=11)
 
         ax_beam.quiver(0, 0, 0, 0, 0, beam_scale * 0.4,

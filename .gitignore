@@ -17,3 +17,6 @@ uv.lock
 # Output
 output/
 *.npz
+
+# Simulation results cache (regenerable, keyed by config hash)
+py-simulation/results/cache/

@@ -17,6 +17,10 @@ class MetricsResult:
     n_detected: int = 0
     n_total: int = 0
     detection_rate: float = 0.0
+    # Front/back metrics — NaN unless the search grid spans both hemispheres.
+    mirror_suppressions_db: np.ndarray = field(default_factory=lambda: np.array([]))
+    front_back_confusion_rate: float = float("nan")
+    mean_mirror_suppression_db: float = float("nan")
 
 
 def angular_error(true_doas, estimated_doas):
@@ -42,17 +46,68 @@ def angular_error(true_doas, estimated_doas):
     return np.degrees(np.arccos(dot))
 
 
-def peak_to_sidelobe_ratio(srp_map, exclude_radius_px=3):
+def peak_to_sidelobe_ratio(srp_map, exclude_radius_px=3, wrap_az=False):
+    """PSR of an (n_az, n_el) map. With `wrap_az`, the mainlobe exclusion
+    wraps around the azimuth seam (full-circle grids)."""
     peak_idx = np.unravel_index(np.argmax(srp_map), srp_map.shape)
     peak_val = srp_map[peak_idx]
 
     mask = np.ones_like(srp_map, dtype=bool)
     yy, xx = np.ogrid[:srp_map.shape[0], :srp_map.shape[1]]
-    dist = np.sqrt((xx - peak_idx[1]) ** 2 + (yy - peak_idx[0]) ** 2)
+    d_az = np.abs(yy - peak_idx[0])
+    if wrap_az:
+        d_az = np.minimum(d_az, srp_map.shape[0] - d_az)
+    dist = np.sqrt((xx - peak_idx[1]) ** 2 + d_az ** 2)
     mask[dist <= exclude_radius_px] = False
 
     sidelobe_val = np.max(srp_map[mask]) if np.any(mask) else peak_val * 0.5
     return 10.0 * np.log10(peak_val / (sidelobe_val + 1e-10))
+
+
+def mirror_direction(az_rad, el_rad):
+    """Mirror of a direction about the array (ring) plane: (az, π − el)."""
+    return az_rad, np.pi - el_rad
+
+
+def _local_peak(srp_map, az_idx, el_idx, radius_px=2):
+    lo_a = max(az_idx - radius_px, 0)
+    hi_a = min(az_idx + radius_px + 1, srp_map.shape[0])
+    lo_e = max(el_idx - radius_px, 0)
+    hi_e = min(el_idx + radius_px + 1, srp_map.shape[1])
+    return float(np.max(srp_map[lo_a:hi_a, lo_e:hi_e]))
+
+
+def front_back_metrics(srp_map, az_range, el_range, true_doa):
+    """Mirror-lobe suppression and front/back confusion for one frame.
+
+    Returns
+    -------
+    dict with:
+      mirror_suppression_db : SRP at the true lobe over SRP at its mirror
+          about the ring plane (positive = mirror rejected). ~0 dB for a
+          planar array, which cannot break the symmetry.
+      confused : True when the global peak is on the wrong side, i.e.
+          spherically closer to the mirror direction than to the truth.
+    """
+    true_az, true_el = float(true_doa[0]), float(true_doa[1])
+    mir_az, mir_el = mirror_direction(true_az, true_el)
+
+    def _nearest(grid, value):
+        return int(np.argmin(np.abs(grid - value)))
+
+    t_peak = _local_peak(srp_map, _nearest(az_range, true_az), _nearest(el_range, true_el))
+    m_peak = _local_peak(srp_map, _nearest(az_range, mir_az), _nearest(el_range, mir_el))
+    suppression_db = 10.0 * np.log10((t_peak + 1e-30) / (m_peak + 1e-30))
+
+    peak_idx = np.unravel_index(np.argmax(srp_map), srp_map.shape)
+    peak_doa = np.array([[az_range[peak_idx[0]], el_range[peak_idx[1]]]])
+    err_true = angular_error(np.array([[true_az, true_el]]), peak_doa)[0]
+    err_mirror = angular_error(np.array([[mir_az, mir_el]]), peak_doa)[0]
+
+    return {
+        "mirror_suppression_db": float(suppression_db),
+        "confused": bool(err_mirror < err_true),
+    }
 
 
 def beamwidth_3db(srp_map, az_range_deg, el_range_deg):
@@ -185,8 +240,9 @@ def compute_metrics(results, array, srp_processor):
             true_doas[valid_mask], estimated_doas[valid_mask]
         )
 
+    wrap_az = getattr(srp_processor, "wrap_az", False)
     psrs = np.array([
-        peak_to_sidelobe_ratio(srp_maps[i])
+        peak_to_sidelobe_ratio(srp_maps[i], wrap_az=wrap_az)
         for i in range(n_frames)
     ])
     bws = np.array([
@@ -194,13 +250,30 @@ def compute_metrics(results, array, srp_processor):
         for i in range(n_frames)
     ])
 
+    # Front/back metrics need a grid reaching past the ring plane (el > 90°).
+    mirror_sup = np.full(n_frames, np.nan)
+    confusion_rate = float("nan")
+    mean_mirror_sup = float("nan")
+    if np.degrees(np.max(srp_processor.el_range)) > 90.0 + 1e-9:
+        confused = np.zeros(n_frames, dtype=bool)
+        for i in range(n_frames):
+            fb = front_back_metrics(
+                srp_maps[i], srp_processor.az_range, srp_processor.el_range,
+                true_doas[i],
+            )
+            mirror_sup[i] = fb["mirror_suppression_db"]
+            confused[i] = fb["confused"]
+        confusion_rate = float(np.mean(confused))
+        mean_mirror_sup = float(np.mean(mirror_sup))
+
     valid_ang = ang_errors[~np.isnan(ang_errors)]
     if len(valid_ang) > 0:
         mean_ang = float(np.mean(valid_ang))
         std_ang = float(np.std(valid_ang))
         max_ang = float(np.max(valid_ang))
     else:
-        mean_ang = std_ang = max_ang = 0.0
+        # No valid detections — an error of 0.0 would read as "perfect".
+        mean_ang = std_ang = max_ang = float("nan")
 
     return MetricsResult(
         angular_errors_deg=ang_errors,
@@ -215,4 +288,7 @@ def compute_metrics(results, array, srp_processor):
         n_detected=n_detected,
         n_total=n_total,
         detection_rate=detection_rate,
+        mirror_suppressions_db=mirror_sup,
+        front_back_confusion_rate=confusion_rate,
+        mean_mirror_suppression_db=mean_mirror_sup,
     )

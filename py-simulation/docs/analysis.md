@@ -1,0 +1,70 @@
+# Analysis Tools — Decision-Grade Outputs
+
+`src/analysis/` and `src/compare.py` turn simulation runs into the artifacts a fabrication decision is made on. All heavy computation reuses the versioned results cache, so repeated/overlapping analyses are cheap.
+
+## Detection-Range Curves (`src/analysis/detection_range.py`)
+
+```python
+from src.analysis import run_range_curve, range_at_rate
+from src.config import Config
+
+base = Config.from_yaml("config/default.yaml")
+curve = run_range_curve(base, distances=[10, 20, 30, 50, 70], n_seeds=3)
+print(range_at_rate(curve, 0.9))   # distance where detection crosses 90 %
+```
+
+- The drone is placed **stationary** at each distance (the base config's trajectory is cleared — a moving trajectory would make "distance" ill-defined) and `signal.snr_db` is forced to `None` so SNR follows the EIN budget.
+- Each (distance, seed) point is an independent config → cached individually, resumable for free.
+- `range_at_rate` interpolates the crossing; NaN when the curve never crosses inside the tested distances (always above → true range beyond the tested span; always below → target unreachable).
+
+## Geometry Comparison Report (`src/compare.py`)
+
+```bash
+# The standing fabrication trade (dual ring at 3 spacings vs 16-mic planar ring)
+make compare-baseline          # ~tens of minutes cold, cheap when cached
+make compare-baseline-quick    # coarse/fast variant
+
+# Custom comparison
+python -m src.compare config/compare/dual_ring_s20.yaml my_candidate.yaml \
+    --distances 10 20 30 50 70 --seeds 3 [--quick] [--base config/default.yaml]
+```
+
+Each positional file is a thin override merged onto `--base` (typically just an `array:` section; changing `array.type` replaces the section wholesale). Compare mode forces full-sphere search so the front/back metrics are populated.
+
+Output under `results/compare_<timestamp>/`:
+
+| File | Content |
+|---|---|
+| `report.md` | Summary table: mics, `range@90%`, `range@50%`, error @ 30 m, mirror suppression, **MCU (H753) feasibility** |
+| `detection_rate_vs_range.png` | One line per geometry, 90 %/50 % guides, shaded 10–50 m pitch target |
+| `angular_error_vs_range.png` / `mirror_suppression_vs_range.png` | Accuracy and front/back rejection vs distance |
+| `beampattern_cuts.png` | Analytical boresight cuts at 400/1000/2000 Hz per geometry |
+| `geometries.png` | 3D mic-position scatter per candidate |
+
+## MCU Budget (`src/analysis/mcu_budget.py`)
+
+Closed-form estimate of what SRP-PHAT costs on the station MCU: phase-table memory (`n_freqs × n_mics × n_dirs × 8 B`) and per-frame complex MACs vs the frame period, against stated NUCLEO-H753ZI assumptions (480 MHz, ~1 complex MAC/cycle with CMSIS-DSP, ~0.82 MB usable SRAM — adjust the constants when firmware measurements exist).
+
+```python
+from src.analysis import estimate_from_config
+budget = estimate_from_config(config, n_mics=16)
+print(budget.summary())   # e.g. "77.67 MB / 22.0 ms per 10.7 ms frame [MEMORY]"
+```
+
+The compare report evaluates this against each geometry's **station** search config (not the full-sphere research grid). Key standing result: the default research grid (±60° @ 2°, 4 kHz band, 16 mics) is far beyond the H753 — the on-station grid must be much coarser (higher `resolution_deg`, lower `max_freq`, higher `min_freq`).
+
+This module is kept as the stable single-target baseline. For per-stage requirements (SRP-PHAT + log-mel + uplink), multi-target verdicts with named binding constraints, and the mic TDM ingest check, use `src/analysis/mcu_requirements.py` — see [mcu.md](mcu.md).
+
+## Two-Station Triangulation (`src/analysis/triangulation.py`)
+
+Geometric Monte Carlo — no audio simulation. A single station only resolves a bearing; C2 fuses two bearings into a 3D position. Feed the single-station bearing error measured by a range curve (`curve.angular_error_deg` at the range of interest) in as `--sigma`:
+
+```bash
+python -m src.analysis.triangulation --baseline 40 --sigma 3 --extent 100 --altitude 30
+```
+
+Produces a heatmap of RMS 3D position error over the coverage area for two stations at the given baseline. `triangulate(station_positions, bearings)` (least-squares ray intersection) is also importable for C2 prototyping and supports ≥ 2 stations.
+
+## What Is Deliberately Not Modeled Here
+
+Two-station *acoustic* co-simulation, PPS/clock-skew effects, and the CNN/log-mel classification pipeline are out of scope — the triangulation module derisks the geometry/error question at a fraction of the cost, and classification belongs to the C2 codebase.

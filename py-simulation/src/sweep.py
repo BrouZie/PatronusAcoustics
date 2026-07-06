@@ -12,7 +12,6 @@ Usage:
 
 import argparse
 import copy
-import hashlib
 import io
 import itertools
 import json
@@ -27,7 +26,14 @@ import csv
 import numpy as np
 import yaml
 
-from .config import Config, deep_merge, parse_dotted_key
+from .analysis.mcu_profiles import BUILTIN_PROFILES
+from .analysis.mcu_requirements import (
+    compute_requirements,
+    evaluate_from_config,
+    evaluate_profile,
+)
+from .config import Config, config_hash, deep_merge, parse_dotted_key
+from .geometry import make_array
 from .main import run_simulation
 
 
@@ -40,13 +46,44 @@ METRIC_FIELDS = [
     "mean_psr_db",
     "std_psr_db",
     "mean_beamwidth_deg",
+    "front_back_confusion_rate",
+    "mean_mirror_suppression_db",
     "n_detected",
     "n_total",
     "n_frames",
     "effective_snr_db",
     "run_time_s",
     "config_hash",
+    # MCU requirement columns (analytic, appended so old CSVs stay a prefix)
+    "mcu_required_mhz",
+    "mcu_required_ram_mb",
+    "mcu_link_kbps",
+    "mcu_recommended",
+    "mcu_h753_ok",
 ]
+
+
+def _mcu_metrics(config):
+    """Analytic MCU requirement columns for one sweep row.
+
+    `mcu_h753_ok` is always judged against the built-in stm32h753 profile
+    so the column means the same thing in every sweep, regardless of
+    which targets are configured.
+    """
+    n_mics = make_array(config.array).n_mics
+    req = compute_requirements(config, n_mics)
+    h753 = evaluate_profile(req, BUILTIN_PROFILES["stm32h753"])
+    try:
+        recommended = evaluate_from_config(config, n_mics).recommended
+    except KeyError:
+        recommended = None
+    return {
+        "mcu_required_mhz": round(req.required_mhz, 1),
+        "mcu_required_ram_mb": round(req.ram_bytes / 2**20, 3),
+        "mcu_link_kbps": round(req.link_bps / 1e3, 1),
+        "mcu_recommended": recommended,
+        "mcu_h753_ok": h753.fits,
+    }
 
 
 def _make_results_dir():
@@ -79,12 +116,6 @@ def _fmt(v):
     return str(v)
 
 
-def _config_hash(config):
-    d = config.to_dict()
-    raw = json.dumps(d, sort_keys=True, default=str).encode()
-    return hashlib.sha256(raw).hexdigest()[:12]
-
-
 def _nested_overrides(overrides):
     """Convert flat dotted-key overrides to nested dicts."""
     result = {}
@@ -108,7 +139,7 @@ def _run_combo(keys, combo, base_dict, overrides):
         deep_merge(d, combo_nested)
         config = Config.from_dict(d)
 
-        h = _config_hash(config)
+        h = config_hash(config)
 
         t0 = time.time()
         with redirect_stdout(io.StringIO()):
@@ -124,6 +155,8 @@ def _run_combo(keys, combo, base_dict, overrides):
         row["max_angular_error_deg"] = metrics.max_angular_error_deg
         row["mean_psr_db"] = metrics.mean_psr_db
         row["mean_beamwidth_deg"] = metrics.mean_beamwidth_deg
+        row["front_back_confusion_rate"] = metrics.front_back_confusion_rate
+        row["mean_mirror_suppression_db"] = metrics.mean_mirror_suppression_db
         row["n_detected"] = metrics.n_detected
         row["n_total"] = metrics.n_total
         row["run_time_s"] = round(elapsed, 3)
@@ -147,6 +180,8 @@ def _run_combo(keys, combo, base_dict, overrides):
             row["std_psr_db"] = float(np.std(metrics.peak_to_sidelobe_ratios_db))
         else:
             row["std_psr_db"] = None
+
+        row.update(_mcu_metrics(config))
 
         return row
     except Exception as e:
@@ -225,7 +260,7 @@ def main(argv=None):
         deep_merge(d, _nested_overrides(overrides))
         deep_merge(d, combo_nested)
         config = Config.from_dict(d)
-        h = _config_hash(config)
+        h = config_hash(config)
         if h in completed_hashes:
             skipped += 1
             continue
@@ -247,11 +282,19 @@ def main(argv=None):
 
     if is_new or not args.resume:
         with open(out, "w", newline="") as f:
-            import csv
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
     else:
-        pass
+        # Appending rows under a stale header silently misaligns columns
+        # (e.g. a CSV started before the MCU columns existed).
+        with open(out, newline="") as f:
+            existing = next(csv.reader(f), [])
+        if existing != fieldnames:
+            sys.exit(
+                f"Error: cannot resume into {out}: its header does not match "
+                f"the current sweep columns (schema changed since the sweep "
+                f"started). Re-run without --resume to start a fresh CSV."
+            )
 
     if args.resume and state_path.exists():
         with open(state_path) as f:

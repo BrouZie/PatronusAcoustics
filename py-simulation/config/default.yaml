@@ -14,6 +14,15 @@ mic:
   snr_dba: 65
   sensitivity_dbFS: -26.0
   aop_db_spl: 120.0
+  # As-built hardware imperfections (ICS-52000 tolerance + PCB assembly).
+  imperfections:
+    gain_std_db: 0.5
+    phase_std_deg: 2.0
+    position_std_mm: 1.5
+    hpf_corner_std_pct: 10.0   # per-mic LF corner spread → freq-dependent mismatch
+    quantization_bits: 24
+    failed_mics: []
+    seed: 0
 
 signal:
   fs: 48000
@@ -57,7 +66,10 @@ environment:
   ground:
     height_m: 5.0
     tilt_deg: 15.0
-    reflection_coefficient: 0.03
+    # Physical |R| for grassland at low frequency. Pre-v5 configs used
+    # 0.03 to compensate a reflected-path amplitude bug (missing 1/d);
+    # with the corrected R/d_image scaling, use realistic values.
+    reflection_coefficient: 0.9
     model: constant
     flow_resistivity: 200000.0
   noise:
@@ -66,7 +78,8 @@ environment:
     traffic_density: "none"
     traffic_direction_deg: 90.0
     bird_activity: 0.10
-    ambient_db: 10.0
+    ambient_db: 30.0          # rural broadband floor, dB SPL (calibrated path)
+    windscreen_il_db: 0       # foam windscreen on each mic (station build) (20.0 previously)
   atmospheric:
     temperature_C: 20.0
     humidity_pct: 50.0
@@ -79,6 +92,22 @@ environment:
   turbulence:
     amplitude_scintillation: false
     scintillation_strength: 0.1
+
+# MCU requirement estimation: per-stage compute/RAM/flash/uplink budgets
+# (SRP-PHAT, log-mel cost model, transmission) matched against target
+# profiles, including whether the part can clock the mic chains in over
+# TDM. Enable to add feasibility sections to compare reports and sweeps.
+mcu:
+  enabled: true
+  headroom_pct: 30.0
+  targets: [stm32h753]        # built-ins: stm32h753, stm32h747, stm32f446,
+                              # esp32s3, imxrt1176 (see docs/mcu.md)
+  logmel:
+    enabled: true
+    n_mels: 64
+    bits_per_bin: 8
+    channels: 1               # 1 = mixdown; fft/hop default to srpphat's
+  link_overhead_pct: 20.0
 
 output:
   animation_fps: 15

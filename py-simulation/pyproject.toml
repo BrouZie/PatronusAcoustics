@@ -20,4 +20,6 @@ patronus = "src.main:main"
 dev = [
     "pybind11>=3.0.4",
     "scikit-build-core>=0.12.2",
+    # Cross-validation of propagation physics (tests skip if missing).
+    "pyroomacoustics>=0.7",
 ]

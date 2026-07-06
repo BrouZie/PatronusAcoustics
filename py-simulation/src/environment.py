@@ -2,10 +2,30 @@ import numpy as np
 from scipy.signal import butter, sosfilt
 
 from .absorption import AtmosphericAbsorption
+from .constants import AIR_DENSITY as RHO0
+from .constants import EPS_DISTANCE, EPS_NORM, SPEED_OF_SOUND_REF, spl_to_pa
 from .refraction import RefractionModel
 
-RHO0 = 1.2
-C0 = 343.0
+# Bare-mic wind-noise pressure as a fraction of dynamic pressure q = ½ρU²:
+# p_rms ≈ Ct·q. Ct ~ 0.1 for an unscreened mic in atmospheric turbulence
+# (Strasberg 1988, JASA 83; Raspet, Webster & Dillion 2006). At 5 m/s this
+# gives ~1.5 Pa ≈ 97 dB SPL, consistent with published bare-mic levels.
+WIND_TURBULENCE_COEFF = 0.1
+
+# Traffic Leq at 10 m by density class (FHWA TNM / CNOSSOS-EU order of
+# magnitude for a two-lane road).
+TRAFFIC_LEQ_10M_DB = {"light": 55.0, "moderate": 65.0, "heavy": 72.0}
+
+
+def colored_noise(n, fs, exponent=1.0):
+    """Unit-variance 1/f^(exponent/2)-shaped noise (pink at exponent=1)."""
+    white = np.random.randn(n)
+    freq = np.fft.rfftfreq(n, 1.0 / fs)
+    freq[0] = freq[1] if len(freq) > 1 else 1.0
+    scaling = 1.0 / (freq ** (exponent / 2.0))
+    S = np.fft.rfft(white) * scaling
+    colored = np.fft.irfft(S, n=n)
+    return colored / (np.std(colored) + EPS_NORM)
 
 
 class GroundReflector:
@@ -56,25 +76,16 @@ class GroundReflector:
 
 
 class DirectionalNoiseSource:
-    speed_sound = 343.0
-
-    def __init__(self, position, fs, n_mics, n_samples):
+    def __init__(self, position, fs, n_mics, n_samples,
+                 speed_sound=SPEED_OF_SOUND_REF):
         self.position = np.array(position, dtype=float)
         self.fs = fs
         self.n_mics = n_mics
         self.n_samples = n_samples
+        self.speed_sound = speed_sound
 
     def _generate(self):
         raise NotImplementedError
-
-    def _colored_noise(self, n, exponent=2.0):
-        white = np.random.randn(n)
-        freq = np.fft.rfftfreq(n, 1.0 / self.fs)
-        freq[0] = freq[1] if len(freq) > 1 else 1.0
-        scaling = 1.0 / (freq ** (exponent / 2.0))
-        S = np.fft.rfft(white) * scaling
-        colored = np.fft.irfft(S, n=n)
-        return colored / (np.std(colored) + 1e-10)
 
     def propagate(self, mic_positions):
         signal = self._generate()
@@ -86,7 +97,7 @@ class DirectionalNoiseSource:
 
         dists = np.linalg.norm(mic_positions - self.position, axis=1)
         delays = dists / self.speed_sound
-        attens = 1.0 / (dists + 1e-6)
+        attens = 1.0 / (dists + EPS_DISTANCE)
 
         result = np.zeros((self.n_mics, n))
         for m in range(self.n_mics):
@@ -96,15 +107,19 @@ class DirectionalNoiseSource:
 
 
 class WindSource:
-    def __init__(self, speed_ms, direction_deg, fs, n_mics, n_samples, array_center):
+    def __init__(self, speed_ms, direction_deg, fs, n_mics, n_samples, array_center,
+                 alpha_xi=0.15, alpha_eta=0.75,
+                 calibrated=False, windscreen_il_db=0.0):
         self.speed_ms = speed_ms
         self.direction_deg = direction_deg
         self.fs = fs
         self.n_mics = n_mics
         self.n_samples = n_samples
         self.array_center = np.array(array_center, dtype=float)
-        self.alpha_xi = 0.15   # streamwise Corcos decay
-        self.alpha_eta = 0.75  # cross-stream Corcos decay (~5× larger)
+        self.alpha_xi = alpha_xi     # streamwise Corcos decay
+        self.alpha_eta = alpha_eta   # cross-stream Corcos decay (~5× larger)
+        self.calibrated = calibrated
+        self.windscreen_il_db = windscreen_il_db
 
     def generate(self, mic_positions):
         n = self.n_samples
@@ -171,22 +186,37 @@ class WindSource:
         X_fft[:, neg_cols] = np.conj(X_fft[:, pos_idx])
 
         result = np.fft.ifft(X_fft, axis=1).real[:, :n]
-        gain = self.speed_ms * 0.008
+        if self.calibrated:
+            # Dynamic-pressure scaling to Pa, minus windscreen insertion loss.
+            q = 0.5 * RHO0 * self.speed_ms ** 2
+            gain = (WIND_TURBULENCE_COEFF * q
+                    * 10.0 ** (-self.windscreen_il_db / 20.0))
+        else:
+            gain = self.speed_ms * 0.008
         return gain * result / (np.std(result) + 1e-10)
 
 
 class TrafficSource(DirectionalNoiseSource):
-    def __init__(self, density, direction_deg, fs, n_mics, n_samples, array_center):
-        dist = 50.0
+    def __init__(self, density, direction_deg, fs, n_mics, n_samples, array_center,
+                 distance_m=50.0, speed_sound=SPEED_OF_SOUND_REF,
+                 calibrated=False):
+        dist = distance_m
         az_rad = np.deg2rad(direction_deg)
         pos = array_center + np.array([
             dist * np.cos(az_rad),
             dist * np.sin(az_rad),
             0.0,
         ])
-        super().__init__(pos, fs, n_mics, n_samples)
-        density_factors = {"light": 0.02, "moderate": 0.05, "heavy": 0.10}
-        self.amp = density_factors.get(density, 0.0)
+        super().__init__(pos, fs, n_mics, n_samples, speed_sound=speed_sound)
+        self.calibrated = calibrated
+        if calibrated:
+            # Source strength in Pa RMS at 1 m so the shared 1/r propagation
+            # reproduces the class Leq at the 10 m reference distance.
+            leq_10m = TRAFFIC_LEQ_10M_DB.get(density)
+            self.amp = 0.0 if leq_10m is None else spl_to_pa(leq_10m) * 10.0
+        else:
+            density_factors = {"light": 0.02, "moderate": 0.05, "heavy": 0.10}
+            self.amp = density_factors.get(density, 0.0)
 
     def _generate(self):
         sos = butter(4, [200 / (self.fs / 2), 2000 / (self.fs / 2)], btype="band", output="sos")
@@ -194,24 +224,34 @@ class TrafficSource(DirectionalNoiseSource):
         mod = 1.0 + 0.5 * np.sin(2 * np.pi * 0.1 * t)
         raw = np.random.randn(self.n_samples)
         traffic = sosfilt(sos, raw)
+        if self.calibrated:
+            traffic = traffic / (np.std(traffic) + EPS_NORM)
         return self.amp * mod * traffic
 
 
 class BirdSource(DirectionalNoiseSource):
-    def __init__(self, activity, fs, n_mics, n_samples, array_center):
+    def __init__(self, activity, fs, n_mics, n_samples, array_center,
+                 distance_m=10.0, speed_sound=SPEED_OF_SOUND_REF,
+                 calibrated=False, spl_at_1m_db=90.0):
         az = np.random.uniform(-60, 60)
         el = np.random.uniform(50, 80)
         az_rad = np.deg2rad(az)
         el_rad = np.deg2rad(el)
-        dist = 10.0
+        dist = distance_m
         pos = array_center + np.array([
             dist * np.cos(el_rad) * np.cos(az_rad),
             dist * np.cos(el_rad) * np.sin(az_rad),
             dist * np.sin(el_rad),
         ])
-        super().__init__(pos, fs, n_mics, n_samples)
+        super().__init__(pos, fs, n_mics, n_samples, speed_sound=speed_sound)
         self.activity = activity
         self.chirp_rate = activity * 2.0
+        if calibrated:
+            # Peak amplitude of a chirp whose RMS-at-peak is the songbird
+            # source level (~90 dB SPL @ 1 m, Brackenbury 1979).
+            self.chirp_amp = spl_to_pa(spl_at_1m_db) * np.sqrt(2.0)
+        else:
+            self.chirp_amp = 0.005
 
     def _generate(self):
         signal = np.zeros(self.n_samples)
@@ -229,38 +269,36 @@ class BirdSource(DirectionalNoiseSource):
                 np.linspace(f0, f1, length) / self.fs
             )
             envelope = np.sin(np.linspace(0, np.pi, length))
-            signal[start:start + length] += 0.005 * envelope * np.sin(phase)
+            signal[start:start + length] += self.chirp_amp * envelope * np.sin(phase)
         return signal
 
 
 class AmbientSource:
-    def __init__(self, ambient_db, fs, n_mics, n_samples):
+    def __init__(self, ambient_db, fs, n_mics, n_samples, calibrated=False):
         self.ambient_db = ambient_db
         self.fs = fs
         self.n_mics = n_mics
         self.n_samples = n_samples
+        self.calibrated = calibrated
 
     def generate(self):
-        amp = self.ambient_db * 0.0003
+        if self.calibrated:
+            # ambient_db is literally the broadband floor in dB SPL.
+            amp = spl_to_pa(self.ambient_db)
+        else:
+            amp = self.ambient_db * 0.0003
         noise = np.zeros((self.n_mics, self.n_samples))
         for m in range(self.n_mics):
-            pink = self._colored_noise(self.n_samples, exponent=1.0)
+            pink = colored_noise(self.n_samples, self.fs, exponent=1.0)
             noise[m] = amp * pink
         return noise
 
-    def _colored_noise(self, n, exponent=1.0):
-        white = np.random.randn(n)
-        freq = np.fft.rfftfreq(n, 1.0 / self.fs)
-        freq[0] = freq[1] if len(freq) > 1 else 1.0
-        scaling = 1.0 / (freq ** (exponent / 2.0))
-        S = np.fft.rfft(white) * scaling
-        colored = np.fft.irfft(S, n=n)
-        return colored / (np.std(colored) + 1e-10)
-
 
 class Environment:
-    def __init__(self, config, fs, n_mics, duration, array_center=None):
+    def __init__(self, config, fs, n_mics, duration, array_center=None,
+                 speed_sound=SPEED_OF_SOUND_REF, calibrated=False):
         self.enabled = config.enabled
+        self.calibrated = calibrated
         if not self.enabled:
             return
         gc = config.ground
@@ -303,20 +341,28 @@ class Environment:
             self._wind_source = WindSource(
                 nc.wind_speed_ms, nc.wind_direction_deg,
                 fs, n_mics, self.n_samples, self.array_center,
+                alpha_xi=nc.corcos_alpha_xi, alpha_eta=nc.corcos_alpha_eta,
+                calibrated=calibrated,
+                windscreen_il_db=nc.windscreen_il_db,
             )
         if nc.traffic_density != "none":
             self._traffic_source = TrafficSource(
                 nc.traffic_density, nc.traffic_direction_deg,
                 fs, n_mics, self.n_samples, self.array_center,
+                distance_m=nc.traffic_distance_m, speed_sound=speed_sound,
+                calibrated=calibrated,
             )
         if nc.bird_activity > 0:
             self._bird_source = BirdSource(
                 nc.bird_activity,
                 fs, n_mics, self.n_samples, self.array_center,
+                distance_m=nc.bird_distance_m, speed_sound=speed_sound,
+                calibrated=calibrated, spl_at_1m_db=nc.bird_spl_db,
             )
         if nc.ambient_db > 0:
             self._ambient_source = AmbientSource(
                 nc.ambient_db, fs, n_mics, self.n_samples,
+                calibrated=calibrated,
             )
 
     @property

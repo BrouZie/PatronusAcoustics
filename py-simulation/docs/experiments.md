@@ -4,17 +4,26 @@ The parameter sweep runner (`python -m src.sweep config/sweep/<topic>.yaml`) mak
 
 Sweep YAML files live in `config/sweep/` — see [config.md](config.md) for the format.
 
+For geometry decisions specifically, prefer the higher-level tools in [analysis.md](analysis.md) (`make compare-baseline`, `run_range_curve`) — sweeps remain the tool for open-ended exploration.
+
 ## Provided Sweep Configs
 
-| Config | Params | Combos | Question |
-|---|---|---|---|
-| `config/sweep/mounting_height.yaml` | height × ground model (constant R / Delany-Bazley) | 16 | How does mounting height affect detection through ground multipath? |
-| `config/sweep/gate_threshold.yaml` | PSR threshold (2–10 dB, 3 distances) | 18 | Does PSR gate threshold limit detection range? |
-| `config/sweep/freq_band.yaml` | min_freq × max_freq | 12 | Which frequency band maximises detection rate? |
-| `config/sweep/detection_range.yaml` | source distance (10–500 m, full band) | 10 | What is the max reliable detection range (full band)? |
-| `config/sweep/detection_range_optimal.yaml` | source distance (10–500 m, 500–2000 Hz band) | 10 | What is the max reliable detection range (optimal band)? |
+| Config | Params | Question |
+|---|---|---|
+| `config/sweep/ring_spacing_vs_range.yaml` | ring spacing × distance | **The fabrication question**: how does spacing trade against range? |
+| `config/sweep/ring_spacing_frontback.yaml` | ring spacing × distance (full sphere) | How much front/back rejection does axial separation buy? |
+| `config/sweep/mounting_height.yaml` | height × ground model (constant R / Delany-Bazley) | How does mounting height affect detection through ground multipath? |
+| `config/sweep/gate_threshold.yaml` | PSR threshold (2–10 dB, 3 distances) | Does PSR gate threshold limit detection range? |
+| `config/sweep/freq_band.yaml` | min_freq × max_freq | Which frequency band maximises detection rate? |
+| `config/sweep/detection_range.yaml` | source distance (full band) | Max reliable detection range (full band)? |
+| `config/sweep/detection_range_optimal.yaml` | source distance (500–2000 Hz band) | Max reliable detection range (optimal band)? |
+| `config/sweep/array.yaml`, `atmospheric.yaml`, `distance.yaml`, `ground.yaml` | single-topic | Further exploration |
+
+Tip: set `signal.seed` in sweep `overrides:` for reproducible rows, and sweep `signal.seed: [0, 1, 2]` to measure run-to-run variance.
 
 ## Completed Experiments
+
+> **Staleness caveat**: the result numbers below were produced before the mid-2026 physics refactor (ISO absorption fix, sensor imperfections in `default.yaml`, sensor-chain rework). Trends and rankings hold; absolute rates — especially long-range, full-band results — should be re-run before being quoted. The results cache versioning (v4) already ignores pre-fix cached runs.
 
 These are documented with full results in [design_validation.md](design_validation.md).
 
@@ -111,15 +120,14 @@ output: results/sweep_trajectory.csv
 
 ### 5. Random Array vs Dual-Ring
 
-Compare the baseline dual-ring with randomly-placed mics (same count) to test whether the concentric ring geometry is optimal:
+Compare the baseline dual-ring with alternative layouts at the same mic budget. This no longer requires new code — use the `xyz` array type with generated positions, or better, run it through the compare CLI:
 
-```yaml
-base_config: config/noisy_oscillating.yaml
-# Requires a new array type in geometry.py
-sweep:
-  array.type: ["dual_ring", "random", "spiral"]
-output: results/sweep_array_type.csv
+```bash
+python -m src.compare config/compare/dual_ring_s20.yaml my_random_array.yaml \
+    --distances 10 20 30 50
 ```
+
+where `my_random_array.yaml` contains an `array: {type: xyz, positions: [...]}` section.
 
 ### 6. Windscreen Directionality Validation
 
@@ -141,5 +149,5 @@ Requires adding a `wind_shielding_db` parameter to the noise config.
 - **Detection rate** is your primary metric. Everything else (angular error, PSR) only matters on detected frames.
 - **Mean angular error** on detected frames may be artificially low when only high-SNR frames pass the gate. Compare with raw (ungated) error for the full picture.
 - **Run time** scales roughly linearly with `duration × (1/resolution²) × (max_freq / fs) × n_mics`. The benchmark config runs in ~0.3s; a full 15s/2°/4kHz run takes ~24s.
-- **Statistical variation**: The simulation is deterministic given the same config. To assess variance, use `signal.snr_db` manual override and sweep `noise.wind_speed_ms` with small variations to see sensitivity.
+- **Statistical variation**: Set `signal.seed` for reproducible runs and sweep the seed itself to measure variance (range curves in `src/analysis` average over seeds automatically).
 - **Optimal band** (500–2000 Hz) should be the default for any realistic assessment; full-band (0–3000 Hz) results are significantly pessimistic.

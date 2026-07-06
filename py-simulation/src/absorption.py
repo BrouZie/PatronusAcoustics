@@ -1,5 +1,7 @@
 import numpy as np
 
+from .constants import saturation_vapor_pressure_kPa
+
 
 class AtmosphericAbsorption:
     """ISO 9613-1 atmospheric sound absorption coefficient.
@@ -20,19 +22,20 @@ class AtmosphericAbsorption:
 
     def _update(self):
         T_K = self.temperature_C + 273.15
-        T = self.temperature_C
-        RH = self.humidity_pct / 100.0
         P = self.pressure_kPa
 
-        C = -6.8346 * (self.T01 / T_K) ** 1.261 + 4.6151
-        P_sat = self.P_ref * 10.0 ** C
-
-        h = RH * P_sat / P
+        # ISO 9613-1 wants h as molar concentration of water vapour in
+        # PERCENT: h = RH% · Psat / Pa (saturation expression shared with
+        # the Cramer sound-speed formula in constants.py).
+        h = self.humidity_pct * saturation_vapor_pressure_kPa(
+            self.temperature_C) / P
 
         f_rO = (P / self.P_ref) * (24.0 + 4.04e4 * h * (0.02 + h) / (0.391 + h))
 
-        d = (T / 293.15) ** (-1.0 / 3.0) - 1.0
-        f_rN = (P / self.P_ref) * (T / 293.15) ** (-0.5) * (
+        # Temperature ratios use absolute temperature (T/T0 with T0 = 293.15 K).
+        Tr = T_K / self.T0
+        d = Tr ** (-1.0 / 3.0) - 1.0
+        f_rN = (P / self.P_ref) * Tr ** (-0.5) * (
             9.0 + 280.0 * h * np.exp(-4.17 * d)
         )
 
@@ -58,10 +61,10 @@ class AtmosphericAbsorption:
         T = self.temperature_C + 273.15
         f_sq = f ** 2
 
-        term1 = 1.84e-11 * (self.P_ref / self.pressure_kPa)
+        term1 = 1.84e-11 * (self.P_ref / self.pressure_kPa) * np.sqrt(T / self.T0)
 
         term2 = (T / self.T0) ** (-2.5) * (
-            0.01278 * np.exp(-2239.1 / T) / (self._f_rO + f_sq / self._f_rO)
+            0.01275 * np.exp(-2239.1 / T) / (self._f_rO + f_sq / self._f_rO)
             + 0.1068 * np.exp(-3352.0 / T) / (self._f_rN + f_sq / self._f_rN)
         )
 

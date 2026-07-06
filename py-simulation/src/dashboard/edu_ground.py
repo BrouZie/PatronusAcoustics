@@ -7,7 +7,8 @@ import numpy as np
 import streamlit as st
 from matplotlib import pyplot as plt
 
-C = 343.0
+from src.constants import SPEED_OF_SOUND_REF as C
+from src.environment import GroundReflector
 
 
 def render_ground_reflection() -> None:
@@ -57,8 +58,12 @@ def render_ground_reflection() -> None:
     R_complex = R_mag * np.exp(1j * np.radians(R_phase))
 
     mic_x = 0.0
+    mic_pos = np.array([mic_x, 0.0, 0.0])
+    image_pos = GroundReflector(height, R_mag).get_image_source(
+        np.array([drone_x, 0.0, drone_z])
+    )
     d_direct = np.sqrt((drone_x - mic_x)**2 + drone_z**2)
-    d_reflected = np.sqrt((drone_x - mic_x)**2 + (drone_z + 2 * height)**2)
+    d_reflected = float(np.linalg.norm(image_pos - mic_pos))
     delta_d = d_reflected - d_direct
 
     phase_diff = 2 * np.pi * freqs * delta_d / C

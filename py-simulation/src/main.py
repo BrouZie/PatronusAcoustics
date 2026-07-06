@@ -127,6 +127,13 @@ def apply_overrides(config, args):
         overrides.setdefault("array", {})["n_mics_ring2"] = args.n_mics_2
     if args.ring_spacing is not None:
         overrides.setdefault("array", {})["ring_spacing"] = args.ring_spacing
+    if "array" in overrides and getattr(config.array, "type", "dual_ring") != "dual_ring":
+        sys.exit(
+            "Error: --ring1-radius/--ring2-radius/--n-mics-1/--n-mics-2/"
+            "--ring-spacing only apply to dual_ring arrays "
+            f"(config uses array type '{config.array.type}'); "
+            "edit the config file instead."
+        )
     if args.snr is not None:
         overrides.setdefault("signal", {})["snr_db"] = args.snr
     if args.duration is not None:

@@ -1,0 +1,12 @@
+# Sweep: the fabrication question — how does ring spacing trade against
+# detection range? Run with:
+#   python -m src.sweep config/sweep/ring_spacing_vs_range.yaml
+base_config: config/default.yaml
+sweep:
+  array.ring_spacing: [0.05, 0.10, 0.20, 0.30]
+  drone.trajectory.closest_distance: [10, 20, 30, 50]
+overrides:
+  signal.seed: 1
+  output.save_animation: false
+  output.save_3d_animation: false
+  output.save_figures: false

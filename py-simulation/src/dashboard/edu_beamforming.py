@@ -10,11 +10,14 @@ import numpy as np
 import streamlit as st
 from matplotlib import pyplot as plt
 
-from ..geometry import DualRingArray
-from ..config import Config, ArrayConfig
-from ..beampattern import steering_vector, array_response
-
-C = 343.0
+from src.geometry import DualRingArray
+from src.config import Config, ArrayConfig
+from src.constants import SPEED_OF_SOUND_REF as C
+from src.dashboard.utils import (
+    beampattern_grid,
+    beamwidth_from_cut,
+    peak_sidelobe_from_cut,
+)
 
 
 def render_beamforming_basics() -> None:
@@ -62,18 +65,21 @@ def render_beamforming_basics() -> None:
         n_mics_ring1=n_mics1,
         n_mics_ring2=n_mics2,
         ring_spacing=ring_spacing,
-        mic_radius=0.005,
     )
     array = DualRingArray(cfg)
+
+    if st.button("📤 Send geometry to Simulation tab", key="edu_send_geom"):
+        st.session_state["handoff_array_config"] = cfg.model_dump()
+        st.rerun()
 
     steer_az_rad = np.radians(steer_az)
     steer_el_rad = np.radians(steer_el)
 
     az_grid = np.radians(np.linspace(-90, 90, 721))
     el_grid = np.radians(np.linspace(0, 90, 361))
-    AZ, EL = np.meshgrid(az_grid, el_grid, indexing="ij")
 
-    B = array_response(array, freq, AZ, EL)
+    pos_bytes = array.positions.tobytes()
+    B = beampattern_grid(pos_bytes, array.n_mics, float(freq))
     B_dB = 10 * np.log10(np.maximum(B, 1e-15))
     bore_idx = np.argmin(np.abs(el_grid))
 
@@ -109,12 +115,12 @@ def render_beamforming_basics() -> None:
         ax.grid(True, alpha=0.3)
         st.pyplot(fig)
 
-        beamwidth_deg = _beamwidth(az_cut, np.degrees(az_grid))
+        beamwidth_deg = beamwidth_from_cut(az_cut, np.degrees(az_grid))
         stats_col1, stats_col2, stats_col3 = st.columns(3)
         with stats_col1:
             st.metric("3 dB Beamwidth", f"{beamwidth_deg:.1f}°" if beamwidth_deg else "N/A")
         with stats_col2:
-            p = _peak_sidelobe(B[:, bore_idx])
+            p = peak_sidelobe_from_cut(B_dB[:, bore_idx])
             st.metric("Peak Sidelobe", f"{p:.1f} dB" if p else "N/A")
         with stats_col3:
             st.metric("N mics", str(array.n_mics))
@@ -135,7 +141,7 @@ def render_beamforming_basics() -> None:
             fig, ax = plt.subplots(figsize=(10, 5))
             colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(comp_freqs)))
             for f, c in zip(comp_freqs, colors):
-                Bf = array_response(array, f, AZ, EL)
+                Bf = beampattern_grid(pos_bytes, array.n_mics, float(f))
                 Bf_dB = 10 * np.log10(np.maximum(Bf, 1e-15))
                 cut = Bf_dB[:, bore_idx]
                 ax.plot(np.degrees(az_grid), cut, color=c, lw=1.5, label=f"{f} Hz")
@@ -195,26 +201,6 @@ def render_beamforming_basics() -> None:
         - The dual-ring gives omnidirectional coverage in azimuth, unlike a ULA
           which has 180° ambiguity
         """)
-
-
-def _beamwidth(cut_dB: np.ndarray, az_deg: np.ndarray) -> float | None:
-    above = cut_dB >= -3
-    if not np.any(above):
-        return None
-    idx = np.where(above)[0]
-    return az_deg[idx[-1]] - az_deg[idx[0]]
-
-
-def _peak_sidelobe(B: np.ndarray) -> float | None:
-    half = len(B) // 2
-    center_third = len(B) // 3
-    main_idx = slice(half - center_third // 2, half + center_third // 2)
-    mask = np.ones(len(B), dtype=bool)
-    mask[main_idx] = False
-    if not np.any(mask):
-        return None
-    peak = np.max(B[mask])
-    return 10 * np.log10(max(peak, 1e-15))
 
 
 def _plot_array_geometry(array) -> plt.Figure:

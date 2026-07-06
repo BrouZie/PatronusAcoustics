@@ -1,0 +1,6 @@
+# Planar 16-mic single ring at the outer Ø34 radius — same mic budget as the
+# dual ring, no axial separation (the front/back-ambiguous baseline).
+array:
+  type: single_ring
+  radius: 0.17
+  n_mics: 16

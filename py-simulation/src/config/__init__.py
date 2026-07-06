@@ -1,6 +1,11 @@
 from .models import (
     Config,
     ArrayConfig,
+    AnyArrayConfig,
+    DualRingArrayConfig,
+    SingleRingArrayConfig,
+    ArbitraryArrayConfig,
+    MicImperfectionConfig,
     SignalConfig,
     MicConfig,
     DroneConfig,
@@ -15,6 +20,10 @@ from .models import (
     NoiseConfig,
     EnvironmentConfig,
     OutputConfig,
+    McuAudioIO,
+    McuProfile,
+    LogMelConfig,
+    McuConfig,
 )
 from .merge import deep_merge, parse_dotted_key
 from .hash import config_hash
@@ -22,6 +31,11 @@ from .hash import config_hash
 __all__ = [
     "Config",
     "ArrayConfig",
+    "AnyArrayConfig",
+    "DualRingArrayConfig",
+    "SingleRingArrayConfig",
+    "ArbitraryArrayConfig",
+    "MicImperfectionConfig",
     "SignalConfig",
     "MicConfig",
     "DroneConfig",
@@ -36,6 +50,10 @@ __all__ = [
     "NoiseConfig",
     "EnvironmentConfig",
     "OutputConfig",
+    "McuAudioIO",
+    "McuProfile",
+    "LogMelConfig",
+    "McuConfig",
     "deep_merge",
     "parse_dotted_key",
     "config_hash",

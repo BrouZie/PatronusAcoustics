@@ -1,8 +1,11 @@
-# Patronus — Dual-Ring Acoustic Array Simulation
+# Patronus — Acoustic Array Simulation
 
-SRP-PHAT beamforming simulation for a 16-microphone dual-ring array targeting UAV detection, with realistic environmental noise and ground reflection modeling. Includes an interactive research dashboard for parameter exploration and educational visualizations.
+SRP-PHAT beamforming simulation for microphone-array UAV detection, with realistic environmental noise, ground reflection, and hardware-imperfection modeling. Its job: answer **what geometry to fabricate** — predict detection range, DOA accuracy, and front/back rejection for any candidate array in a realistic environment — and teach the team the underlying physics via an interactive dashboard.
 
 ```
+# The fabrication decision artifact (report.md + plots)
+make compare-baseline
+
 # CLI
 python -m src.main -c config/noisy_oscillating.yaml --quick --no-animation
 
@@ -12,18 +15,20 @@ streamlit run src/dashboard/app.py
 
 ## Feature Summary
 
-- **Dual-ring array** — 8+8 mics on concentric rings, configurable radii/spacing/mic count, optional tilt
-- **SRP-PHAT beamforming** — vectorized via `np.einsum` with precomputed phase tensor; 7.3× speedup vs frequency loop
+- **Pluggable array geometry** — dual ring (default), single ring, or arbitrary XYZ positions (`array.type` in config); all run through the identical pipeline
+- **SRP-PHAT beamforming** — vectorized via `np.einsum` with precomputed phase tensor; window / front-hemisphere / **full-sphere** search coverage
+- **Front/back rejection metrics** — mirror-lobe suppression and confusion rate quantify what the axial ring separation actually buys (the core dual-ring design question)
+- **Geometry comparison reports** — `python -m src.compare geomA.yaml geomB.yaml` → detection-rate-vs-range curves, range@90%/range@50%, beampattern cuts, and an H753 MCU memory/compute feasibility column
 - **6 drone trajectory types** — stationary, linear, flyby (CPA), arc, oscillating, waypoint; Doppler-capable via per-sample delay interpolation
-- **ICS-52000 MEMS microphone model** — EIN-derived SNR (65 dBA → 29 dBA noise floor), 75 Hz HPF, tanh AOP soft-clipping
+- **Sensor model** — EIN-derived noise floor (ICS-52000, 65 dBA), per-mic gain/phase mismatch, PCB placement error, dead channels, 24-bit quantization (`mic.imperfections`)
+- **ISO 9613-1 atmospheric absorption** — validated against published table anchors; temperature-derived speed of sound shared across all modules
 - **Ground reflection** — image-source model with configurable coefficient; dominant detection degrader via BPF harmonic cancellation
 - **Directional environmental noise** — Corcos wind coherence field (Cholesky-decomposed), traffic (bandpass+AM), bird FM chirps, ambient diffuse pink noise
-- **Detection gate** — peak-to-mean ratio with configurable threshold; only high-confidence frames contribute to angular error
-- **3D beamsphere animation** — rotating MP4 with SRP sphere, heatmap, DOA tracking, and metrics panel
+- **Two-station triangulation** — geometric Monte Carlo (`python -m src.analysis.triangulation`) mapping 3D position error from measured single-station bearing error
 - **Parameter sweep runner** — YAML-defined Cartesian product sweeps over any config path; per-run aggregate CSV output, checkpoint/resume
-- **Simulation cache** — auto-caches results keyed by config hash; avoids redundant recomputation during dashboard exploration
-- **Interactive dashboard** — Streamlit app with auto-generated config form, sweep results browser, and 3 educational visualization modules
-- **96 unit tests** — configuration (Pydantic validation), SRP vectorization, environment/turbulence/ground, sweep results & cache
+- **Simulation cache** — results keyed by config hash under `results/cache/v<N>/`; prune with `python -m src.results.cache --prune`
+- **Interactive dashboard** — auto-generated config form, sweep browser, educational modules that reuse the production physics, and an Educational → Simulation geometry handoff
+- **160+ tests** — including known-answer physics validation (ISO absorption anchors, aperture scaling laws, SRP known answers, front/back physics) and dashboard AppTest smoke tests
 
 ## Quick Start
 
@@ -46,11 +51,24 @@ uv run streamlit run src/dashboard/app.py
 # Parameter sweep
 uv run python -m src.sweep config/sweep/mounting_height.yaml
 
+# The fabrication question: ring spacing vs detection range / front-back rejection
+uv run python -m src.sweep config/sweep/ring_spacing_vs_range.yaml
+uv run python -m src.sweep config/sweep/ring_spacing_frontback.yaml
+
+# Geometry comparison report (fast variant: make compare-baseline-quick)
+make compare-baseline
+
+# Analytical beampattern for the configured geometry
+uv run python -m src.beampattern -c config/default.yaml
+
+# Two-station triangulation error map (σ from a measured range curve)
+uv run python -m src.analysis.triangulation --baseline 40 --sigma 3
+
 # Dump config schema with descriptions and defaults
 uv run python -m src.main --dump-schema
 
 # Run tests
-uv run pytest
+uv run python -m pytest tests/
 ```
 
 ## Documentation
@@ -64,7 +82,8 @@ uv run pytest
 | [docs/environment.md](docs/environment.md) | Ground reflection, Corcos wind, traffic, birds, ambient |
 | [docs/snr.md](docs/snr.md) | EIN-based SNR vs manual override, ICS-52000 specs |
 | [docs/srpphat.md](docs/srpphat.md) | Vectorized SRP-PHAT, phase tensor, detection gate |
-| [docs/metrics.md](docs/metrics.md) | Per-frame + aggregate metrics, CSV column reference |
+| [docs/metrics.md](docs/metrics.md) | Per-frame + aggregate metrics (incl. front/back), CSV column reference |
+| [docs/analysis.md](docs/analysis.md) | Range curves, geometry comparison reports, triangulation, MCU budget |
 | [docs/usage.md](docs/usage.md) | CLI reference, sweep runner, dashboard, config inventory |
 | [docs/visualization.md](docs/visualization.md) | Figures, animations, raw data format |
 | [docs/realism.md](docs/realism.md) | Realism assessment, key findings, trust guidance |

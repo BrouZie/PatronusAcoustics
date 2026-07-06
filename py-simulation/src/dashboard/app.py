@@ -12,13 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from ..config import Config
-from ..results import SweepCatalog, cached_run, has_cached
-from .forms import render_config_form
-from .results_view import show_results
-from .edu_beamforming import render_beamforming_basics
-from .edu_ground import render_ground_reflection
-from .edu_geometry import render_array_geometry
+from src.config import Config
+from src.results import SweepCatalog, cached_run, has_cached
+from src.dashboard.forms import render_config_form
+from src.dashboard.results_view import show_results
+from src.dashboard.edu_beamforming import render_beamforming_basics
+from src.dashboard.edu_ground import render_ground_reflection
+from src.dashboard.edu_geometry import render_array_geometry
 
 
 st.set_page_config(

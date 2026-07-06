@@ -14,8 +14,7 @@ from pathlib import Path
 
 from .geometry import DualRingArray
 from .config import Config
-
-C = 343.0
+from .constants import SPEED_OF_SOUND_REF as C
 
 
 def steering_vector(array, f, az_rad, el_rad):
@@ -272,7 +271,21 @@ def plot_beampattern(array, output_dir, freqs=None, az_range_deg=(-90, 90),
 
 
 if __name__ == "__main__":
-    cfg = Config.from_yamls("config/default.yaml")
-    array = DualRingArray(cfg.array)
-    out = Path(__file__).resolve().parent.parent / "figures"
-    plot_beampattern(array, str(out))
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Analytical array beampattern")
+    parser.add_argument(
+        "-c", "--config", default="config/default.yaml",
+        help="YAML config providing the array geometry",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default=str(Path(__file__).resolve().parent.parent / "figures"),
+    )
+    args = parser.parse_args()
+
+    from .geometry import make_array
+
+    cfg = Config.from_yamls(args.config)
+    array = make_array(cfg.array)
+    plot_beampattern(array, args.output)

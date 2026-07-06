@@ -40,7 +40,7 @@ uv run streamlit run src/dashboard/app.py
 | `--profile` | Profile with cProfile (top-20 cumtime) |
 | `--dry-run` | Print run name and output path, don't run |
 | `--dump-schema` | Print configuration schema with descriptions and defaults, then exit |
-| `--ring1-radius, --ring2-radius, --n-mics-1, --n-mics-2, --ring-spacing` | Array geometry overrides |
+| `--ring1-radius, --ring2-radius, --n-mics-1, --n-mics-2, --ring-spacing` | Array geometry overrides (dual-ring configs only; other `array.type`s must be edited in the YAML) |
 
 ## Interactive Dashboard
 
@@ -56,8 +56,8 @@ Three tabs:
 
 2. **Sweep Results** — Browse past sweep runs via `SweepCatalog`. View CSV data in a table, explore parameter vs metric relationships with interactive scatter plots.
 
-3. **Educational** — Three interactive learning modules:
-   - **Beamforming Basics**: Polar + cartesian beampattern plots, array geometry visualization, multi-frequency overlay, ULA comparison
+3. **Educational** — Three interactive learning modules built on the production physics (`src.beampattern`, `src.geometry`, `src.environment`), with `st.cache_data` so slider changes stay responsive:
+   - **Beamforming Basics**: Polar + cartesian beampattern plots, array geometry visualization, multi-frequency overlay, ULA comparison — plus a **"Send geometry to Simulation tab"** button that loads the slider geometry into the Simulation form (explore → run the full sim on that exact geometry)
    - **Ground Reflection**: Image source geometry, frequency response with interference notches, coherence vs range
    - **Array Geometry Tradeoffs**: Dual-ring vs ULA vs UCA vs Sparse comparison with metrics table
 
@@ -72,10 +72,9 @@ uv run python -m src.sweep config/sweep/detection_range.yaml --dry-run
 
 # Resume from checkpoint
 uv run python -m src.sweep config/sweep/detection_range.yaml --resume
-
-# Use 8 parallel workers
-uv run python -m src.sweep config/sweep/detection_range.yaml --workers 8
 ```
+
+Combinations run sequentially (the `--workers` flag is currently accepted but not used).
 
 Sweep configs live in `config/sweep/*.yaml`. Each references `config/default.yaml` as its base.
 See [config.md](config.md) for the YAML format.
@@ -84,15 +83,41 @@ Each run creates a timestamped subfolder under `results/` containing:
 - `sweep_results.csv` — incremental CSV with per-combination metrics
 - `sweep_results.csv.state.json` — checkpoint state for resume
 
+## Geometry Comparison & Analysis Tools
+
+The decision-grade layer on top of sweeps — see [analysis.md](analysis.md):
+
+```bash
+# Fabrication-trade report: dual ring at 3 spacings vs 16-mic planar ring
+make compare-baseline          # full;  make compare-baseline-quick for a fast pass
+
+# Custom geometry comparison → report.md + plots under results/compare_<ts>/
+uv run python -m src.compare config/compare/dual_ring_s20.yaml my_array.yaml \
+    --distances 10 20 30 50 70
+
+# Analytical beampattern of the configured geometry
+uv run python -m src.beampattern -c config/default.yaml
+
+# Two-station triangulation error heatmap (σ from a measured range curve)
+uv run python -m src.analysis.triangulation --baseline 40 --sigma 3
+```
+
 ## Simulation Cache
 
-Results are automatically cached in `results/cache/<config_hash>/`. When the same config is run again (e.g., from the dashboard), cached results are loaded instead of re-running. Clear the cache with:
+Results are cached in `results/cache/v<N>/<config_hash>/` (gitignored). When the same config is run again (e.g., from the dashboard or a range curve), cached results are loaded instead of re-running. The version directory `v<N>` (`CACHE_SCHEMA_VERSION` in `src/results/cache.py`) is bumped whenever simulation numerics change without a config change — old-physics results are then ignored automatically.
 
 ```python
 from src.results import clear_cache
 clear_cache()          # clear all
 clear_cache(config)    # clear specific
 ```
+
+```bash
+# Prune oldest entries until the cache fits in 5 GB (LRU by mtime)
+uv run python -m src.results.cache --prune --max-gb 5
+```
+
+Reproducibility: set `signal.seed` for a deterministic acoustic realization; `mic.imperfections.seed` fixes one hardware "build" independently.
 
 ## Output Structure
 
@@ -142,13 +167,16 @@ print(Config.schema())
 | `-c config/quick.yaml` | 4s, 4° grid, 2 kHz, no output | 4s | ~2s |
 | `-c config/benchmark.yaml` | 2s stationary, SNR=25, 4°, 2 kHz | 2s | ~0.3s |
 
-| Sweep config | Parameters swept | Combos |
-|---|---|---|
-| `config/sweep/mounting_height.yaml` | Height × ground model (constant/Delany-Bazley) | 16 |
-| `config/sweep/gate_threshold.yaml` | PSR threshold (2–10 dB) | 18 |
-| `config/sweep/freq_band.yaml` | Min/max frequency band limits | 12 |
-| `config/sweep/detection_range.yaml` | Source distance (10–300 m, full band) | 10 |
-| `config/sweep/detection_range_optimal.yaml` | Source distance (10–500 m, 500–2000 Hz band) | 10 |
+| Sweep config | Parameters swept |
+|---|---|
+| `config/sweep/ring_spacing_vs_range.yaml` | **The fabrication question**: ring spacing × distance |
+| `config/sweep/ring_spacing_frontback.yaml` | Ring spacing × distance at full-sphere coverage → front/back rejection |
+| `config/sweep/mounting_height.yaml` | Height × ground model (constant/Delany-Bazley) |
+| `config/sweep/gate_threshold.yaml` | PSR threshold (2–10 dB) |
+| `config/sweep/freq_band.yaml` | Min/max frequency band limits |
+| `config/sweep/detection_range.yaml` | Source distance (full band) |
+| `config/sweep/detection_range_optimal.yaml` | Source distance (500–2000 Hz band) |
+| `config/sweep/array.yaml`, `atmospheric.yaml`, `distance.yaml`, `ground.yaml` | Further single-topic sweeps |
 
 > Timings on **12th Gen i7-1255U** (Alder Lake, 10c/12t). C++ acceleration active (`make build`).
 > 

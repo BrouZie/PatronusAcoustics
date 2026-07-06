@@ -8,7 +8,12 @@ from pathlib import Path
 def _draw_array_geometry(ax, array, highlighted_mic=None):
     ax.clear()
     pos = array.positions
-    colors = ["#1f77b4"] * array.n_mics_ring1 + ["#ff7f0e"] * array.n_mics_ring2
+
+    is_dual_ring = hasattr(array, "ring1_radius")
+    if is_dual_ring:
+        colors = ["#1f77b4"] * array.n_mics_ring1 + ["#ff7f0e"] * array.n_mics_ring2
+    else:
+        colors = ["#1f77b4"] * array.n_mics
 
     ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=colors, s=40, alpha=0.9)
 
@@ -16,16 +21,17 @@ def _draw_array_geometry(ax, array, highlighted_mic=None):
         ax.scatter([pos[highlighted_mic, 0]], [pos[highlighted_mic, 1]], [pos[highlighted_mic, 2]],
                    c="red", s=80, marker="*")
 
-    ring_angles = np.linspace(0, 2 * np.pi, 100)
-    for radius, z in [(array.ring1_radius, -array.ring_spacing / 2),
-                      (array.ring2_radius, array.ring_spacing / 2)]:
-        ax.plot(radius * np.cos(ring_angles), radius * np.sin(ring_angles),
-                z * np.ones_like(ring_angles), "gray", alpha=0.4, linewidth=1)
+    if is_dual_ring:
+        ring_angles = np.linspace(0, 2 * np.pi, 100)
+        for radius, z in [(array.ring1_radius, -array.ring_spacing / 2),
+                          (array.ring2_radius, array.ring_spacing / 2)]:
+            ax.plot(radius * np.cos(ring_angles), radius * np.sin(ring_angles),
+                    z * np.ones_like(ring_angles), "gray", alpha=0.4, linewidth=1)
 
     # Boresight arrow
     ax.quiver(0, 0, 0, 0, 0, 0.3, color="green", alpha=0.7, linewidth=2, arrow_length_ratio=0.2)
 
-    max_extent = max(array.ring1_radius, array.ring2_radius, array.ring_spacing / 2) * 1.5
+    max_extent = max(float(np.max(np.abs(pos))), 0.1) * 1.5
     ax.set_xlim(-max_extent, max_extent)
     ax.set_ylim(-max_extent, max_extent)
     ax.set_zlim(-max_extent, max_extent)
@@ -98,6 +104,24 @@ def _draw_doa_tracking(ax, timestamps, true_doas, estimated_doas, detections=Non
     ax.grid(True, alpha=0.3)
 
 
+def _array_summary(array_cfg):
+    kind = getattr(array_cfg, "type", "dual_ring")
+    if kind == "dual_ring":
+        return (
+            f"Array: R1={array_cfg.ring1_radius:.2f}m, "
+            f"R2={array_cfg.ring2_radius:.2f}m, "
+            f"d={array_cfg.ring_spacing:.2f}m\n"
+            f"Mics: {array_cfg.n_mics_ring1}+{array_cfg.n_mics_ring2}"
+        )
+    if kind == "single_ring":
+        return (
+            f"Array: single ring R={array_cfg.radius:.2f}m\n"
+            f"Mics: {array_cfg.n_mics}"
+        )
+    n = len(array_cfg.positions) if array_cfg.positions is not None else "?"
+    return f"Array: custom XYZ\nMics: {n}"
+
+
 def _draw_metrics_panel(ax, metrics, config):
     ax.clear()
     ax.axis("off")
@@ -111,10 +135,7 @@ def _draw_metrics_panel(ax, metrics, config):
     ]
 
     cfg_text = (
-        f"Array: R1={config.array.ring1_radius:.2f}m, "
-        f"R2={config.array.ring2_radius:.2f}m, "
-        f"d={config.array.ring_spacing:.2f}m\n"
-        f"Mics: {config.array.n_mics_ring1}+{config.array.n_mics_ring2}\n"
+        f"{_array_summary(config.array)}\n"
         f"Drone: {config.drone.rpm} RPM, "
         f"SNR={config.signal.snr_db} dB"
     )

@@ -1,0 +1,15 @@
+# Sweep: how much front/back rejection does the axial ring separation buy?
+# The dual-ring design exists to break the front/back mirror symmetry a
+# planar ring cannot resolve — this sweep quantifies that vs spacing.
+#   python -m src.sweep config/sweep/ring_spacing_frontback.yaml
+base_config: config/default.yaml
+sweep:
+  array.ring_spacing: [0.001, 0.05, 0.10, 0.20, 0.30]
+  drone.trajectory.closest_distance: [10, 30]
+overrides:
+  signal.seed: 1
+  srpphat.search.coverage: full_sphere
+  srpphat.search.resolution_deg: 4.0
+  output.save_animation: false
+  output.save_3d_animation: false
+  output.save_figures: false

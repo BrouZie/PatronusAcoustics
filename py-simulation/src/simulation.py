@@ -1,8 +1,10 @@
 import numpy as np
 
 from .config import Config
-from .geometry import DualRingArray
+from .constants import EPS_NORM, SPEED_OF_SOUND_REF, speed_of_sound
+from .geometry import cartesian_to_angles, make_array
 from .drone_signal import DroneSource
+from .sensor import SensorModel, effective_snr_db
 from .srpphat import SRPPhatProcessor
 from .metrics import compute_metrics, compute_gate1
 from .visualize import save_summary_figures
@@ -13,13 +15,39 @@ from .environment import Environment
 class Simulation:
     def __init__(self, config: Config):
         self.config = config
-        self.array = DualRingArray(config.array)
+
+        # Calibrated Pa-referenced path unless the snr_db override is set
+        # (sweeps use snr_db as a direct level knob; that legacy path keeps
+        # normalized units and signal-relative noise).
+        self.calibrated = config.signal.snr_db is None
+
+        # One speed of sound for geometry steering, propagation, and noise
+        # paths alike. Environment disabled keeps the 343.0 reference;
+        # enabled uses Cramer (1993) with temperature, humidity, pressure.
+        if config.environment.enabled:
+            atm = config.environment.atmospheric
+            self.speed_sound = speed_of_sound(
+                atm.temperature_C,
+                humidity_pct=atm.humidity_pct,
+                pressure_kPa=atm.pressure_kPa,
+            )
+        else:
+            self.speed_sound = SPEED_OF_SOUND_REF
+
+        self.array = make_array(config.array, speed_sound=self.speed_sound)
+        self.sensor = SensorModel(
+            config.mic, self.array.n_mics, config.signal.fs
+        )
+        self.array.perturb(self.sensor.position_offsets)
+
         self.env = Environment(
             config.environment,
             config.signal.fs,
             self.array.n_mics,
             config.signal.duration,
             array_center=np.array([0.0, 0.0, 0.0]),
+            speed_sound=self.speed_sound,
+            calibrated=self.calibrated,
         )
 
         absorption = self.env.absorption if self.env.enabled else None
@@ -35,22 +63,27 @@ class Simulation:
         else:
             temp_C, press_kPa, wind_ms, wind_deg = 20.0, 101.325, 0.0, 0.0
 
+        turb = config.environment.turbulence
         self.drone = DroneSource(
             config.drone,
             absorption=absorption,
             refraction=refraction,
             scintillation_enabled=(
-                self.env.enabled and
-                config.environment.turbulence.amplitude_scintillation
+                self.env.enabled and turb.amplitude_scintillation
             ),
             scintillation_strength=(
-                config.environment.turbulence.scintillation_strength
-                if self.env.enabled else 0.0
+                turb.scintillation_strength if self.env.enabled else 0.0
             ),
             temperature_C=temp_C,
             pressure_kPa=press_kPa,
             wind_speed_ms=wind_ms,
             wind_direction_deg=wind_deg,
+            speed_sound=self.speed_sound,
+            turbulence_tau_std_s=turb.phase_jitter_std_us * 1e-6,
+            turbulence_tau_corr_s=turb.phase_jitter_corr_ms * 1e-3,
+            scintillation_tau_corr_s=turb.scintillation_corr_ms * 1e-3,
+            source_spl_db=(config.signal.drone_spl_db if self.calibrated
+                           else None),
         )
 
         self.srp = SRPPhatProcessor(
@@ -66,34 +99,18 @@ class Simulation:
             detection_config=config.srpphat.detection,
         )
 
-    def _compute_snr_db(self, cfg):
-        snr_db = cfg.signal.snr_db
-        if snr_db is not None:
-            return float(snr_db)
-
-        mic = cfg.mic
-        ref_spl = 94.0
-        ein_db = ref_spl - mic.snr_dba
-        dist = cfg.drone.distance
-        spl_at_mic = cfg.signal.drone_spl_db - 20 * np.log10(max(dist, 0.1))
-
-        if self.env.enabled:
-            bpf = (cfg.drone.rpm * cfg.drone.num_blades) / 60.0
-            harmonics = np.arange(1, getattr(cfg.drone, 'bpf_harmonics', 6) + 1)
-            freqs = harmonics * bpf
-            alphas = self.env.absorption.coefficient(freqs)
-            alpha_avg = np.mean(alphas)
-            absorption_loss = alpha_avg * dist
-            spl_at_mic -= absorption_loss
-
-        return float(spl_at_mic - ein_db)
-
     def run(self):
         cfg = self.config
         fs = cfg.signal.fs
         duration = cfg.signal.duration
 
-        snr_db = self._compute_snr_db(cfg)
+        # Signal/noise generation uses the global numpy RNG throughout.
+        if cfg.signal.seed is not None:
+            np.random.seed(cfg.signal.seed)
+
+        snr_db = effective_snr_db(
+            cfg, absorption=self.env.absorption if self.env.enabled else None
+        )
 
         tilt_deg = cfg.environment.ground.tilt_deg if cfg.environment.enabled else 0.0
         if tilt_deg != 0:
@@ -105,19 +122,30 @@ class Simulation:
 
         print("Generating microphone signals...")
         mic_signals, source_positions = self.drone.generate_mic_signals(
-            self.array, fs, duration, snr_db
+            self.array, fs, duration
         )
-
-        if self.env.has_noise:
-            print("Adding environmental noise...")
-            mic_pos = self.array.get_mic_positions_world()
-            env_noise = self.env.generate_noise(mic_pos)
-            if env_noise is not None:
-                env_noise = env_noise[:, :mic_signals.shape[1]]
-                mic_signals += env_noise
-            self._wind_dir = self.env.wind_coherence_directionality(mic_pos)
+        self._wind_dir = None
+        if self.calibrated:
+            # Acoustic noise is pressure at the diaphragm: it enters the
+            # mic chain (HPF, clip, EIN, Pa→FS, quantization) with the signal.
+            if self.env.has_noise:
+                print("Adding environmental noise...")
+                mic_pos = self.array.get_mic_positions_world()
+                env_noise = self.env.generate_noise(mic_pos)
+                if env_noise is not None:
+                    mic_signals += env_noise[:, :mic_signals.shape[1]]
+                self._wind_dir = self.env.wind_coherence_directionality(mic_pos)
+            mic_signals = self.sensor.apply(mic_signals, absolute=True)
         else:
-            self._wind_dir = None
+            # Legacy order preserved bit-for-bit (snr_db override path).
+            mic_signals = self.sensor.apply(mic_signals, snr_db)
+            if self.env.has_noise:
+                print("Adding environmental noise...")
+                mic_pos = self.array.get_mic_positions_world()
+                env_noise = self.env.generate_noise(mic_pos)
+                if env_noise is not None:
+                    mic_signals += env_noise[:, :mic_signals.shape[1]]
+                self._wind_dir = self.env.wind_coherence_directionality(mic_pos)
 
         if self.env.has_ground and hasattr(self.array, "world_to_array_coords"):
             source_positions = self.array.world_to_array_coords(source_positions)
@@ -144,8 +172,8 @@ class Simulation:
         print(f"Processing {n_frames} frames...")
         for i, start in enumerate(frame_starts):
             pos = source_positions[center_samples[i]]
-            direction = pos / (np.linalg.norm(pos) + 1e-10)
-            true_az, true_el = DualRingArray.cartesian_to_angles(direction)
+            direction = pos / (np.linalg.norm(pos) + EPS_NORM)
+            true_az, true_el = cartesian_to_angles(direction)
             true_doas[i] = [true_az, true_el]
 
             frame = mic_signals[:, start:start + fft_size]

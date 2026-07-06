@@ -1,6 +1,6 @@
 from dataclasses import MISSING
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, model_validator, field_validator
@@ -10,11 +10,14 @@ from pydantic.fields import FieldInfo
 from .merge import deep_merge, parse_dotted_key
 
 API = (
-    "MotionConfig", "ArrayConfig", "MicConfig", "SignalConfig",
-    "DroneConfig", "SearchConfig", "DetectionConfig", "SRPPhatConfig",
-    "GroundConfig", "AtmosphericConfig", "RefractionConfig",
+    "MotionConfig", "ArrayConfig", "AnyArrayConfig", "DualRingArrayConfig",
+    "SingleRingArrayConfig", "ArbitraryArrayConfig",
+    "MicConfig", "MicImperfectionConfig",
+    "SignalConfig", "DroneConfig", "SearchConfig", "DetectionConfig",
+    "SRPPhatConfig", "GroundConfig", "AtmosphericConfig", "RefractionConfig",
     "TurbulenceConfig", "NoiseConfig", "EnvironmentConfig",
     "OutputConfig", "Config", "deep_merge", "parse_dotted_key",
+    "McuAudioIO", "McuProfile", "LogMelConfig", "McuConfig",
 )
 
 
@@ -42,9 +45,10 @@ class MotionConfig(BaseModel):
         return self
 
 
-class ArrayConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+class DualRingArrayConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
+    type: Literal["dual_ring"] = "dual_ring"
     ring1_radius: float = Field(
         default=0.34, gt=0, le=5,
         description="Radius of the outer ring",
@@ -70,6 +74,99 @@ class ArrayConfig(BaseModel):
     )
 
 
+class SingleRingArrayConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["single_ring"] = "single_ring"
+    radius: float = Field(
+        default=0.25, gt=0, le=5,
+        description="Ring radius",
+        **_meta(unit="m"),
+    )
+    n_mics: int = Field(
+        default=16, ge=2, le=64,
+        description="Number of microphones on the ring",
+    )
+    z_offset: float = Field(
+        default=0.0, ge=-2, le=2,
+        description="Ring offset along boresight",
+        **_meta(unit="m"),
+    )
+
+
+class ArbitraryArrayConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["xyz"] = "xyz"
+    positions: list[tuple[float, float, float]] | None = Field(
+        default=None,
+        description="Mic positions (x, y, z) in the array frame, +z = boresight",
+        **_meta(unit="m"),
+    )
+    csv_path: str | None = Field(
+        default=None,
+        description="CSV file of x,y,z rows (prefer inline positions: file "
+                    "contents are not part of the config hash)",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self):
+        if (self.positions is None) == (self.csv_path is None):
+            raise ValueError("provide exactly one of 'positions' or 'csv_path'")
+        if self.positions is not None and len(self.positions) < 2:
+            raise ValueError("need at least 2 microphone positions")
+        return self
+
+
+# Backward-compatible alias: existing code constructs ArrayConfig(...) with
+# dual-ring kwargs.
+ArrayConfig = DualRingArrayConfig
+
+AnyArrayConfig = Annotated[
+    DualRingArrayConfig | SingleRingArrayConfig | ArbitraryArrayConfig,
+    Field(discriminator="type"),
+]
+
+
+class MicImperfectionConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    gain_std_db: float = Field(
+        default=0.0, ge=0, le=12,
+        description="Per-mic gain mismatch std (ICS-52000 tolerance ~±1 dB)",
+        **_meta(unit="dB"),
+    )
+    phase_std_deg: float = Field(
+        default=0.0, ge=0, le=90,
+        description="Per-mic phase mismatch std",
+        **_meta(unit="deg"),
+    )
+    position_std_mm: float = Field(
+        default=0.0, ge=0, le=50,
+        description="Per-mic placement error std (PCB/assembly tolerance)",
+        **_meta(unit="mm"),
+    )
+    quantization_bits: int | None = Field(
+        default=None, ge=8, le=32,
+        description="ADC quantization depth (None = ideal, ICS-52000 = 24)",
+    )
+    hpf_corner_std_pct: float = Field(
+        default=0.0, ge=0, le=50,
+        description="Per-mic spread of the LF roll-off corner as % of "
+                    "nominal — yields frequency-dependent gain AND phase "
+                    "mismatch at low frequencies (part-to-part tolerance)",
+        **_meta(unit="%"),
+    )
+    failed_mics: list[int] = Field(
+        default_factory=list,
+        description="Indices of dead microphone channels",
+    )
+    seed: int = Field(
+        default=0, ge=0,
+        description="Seed for the imperfection draw (one 'build' of the array)",
+    )
+
+
 class MicConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -91,6 +188,10 @@ class MicConfig(BaseModel):
         default=120.0, ge=60, le=200,
         description="Acoustic overload point",
         **_meta(unit="dB SPL"),
+    )
+    imperfections: MicImperfectionConfig = Field(
+        default_factory=MicImperfectionConfig,
+        description="Per-mic hardware imperfections (mismatch, placement, ADC)",
     )
 
 
@@ -116,6 +217,10 @@ class SignalConfig(BaseModel):
         default=70.0, ge=0, le=200,
         description="Drone source SPL at 1 m",
         **_meta(unit="dB SPL @ 1m"),
+    )
+    seed: int | None = Field(
+        default=None, ge=0,
+        description="Random seed for reproducible runs (None = non-deterministic)",
     )
 
 
@@ -157,6 +262,34 @@ class DroneConfig(BaseModel):
         default=6, ge=1, le=20,
         description="Number of blade-pass frequency harmonics",
     )
+    rpm_spread_pct: float = Field(
+        default=2.0, ge=0, le=20,
+        description="Per-rotor RPM offset std as % of nominal RPM; distinct "
+                    "rotor BPFs beat against each other (0 = identical rotors)",
+        **_meta(unit="%"),
+    )
+    rpm_jitter_pct: float = Field(
+        default=0.5, ge=0, le=20,
+        description="Slow RPM wander std as % of nominal (throttle/gust "
+                    "corrections), Ornstein-Uhlenbeck per rotor",
+        **_meta(unit="%"),
+    )
+    rpm_jitter_corr_s: float = Field(
+        default=0.5, gt=0, le=30,
+        description="Correlation time of the RPM wander",
+        **_meta(unit="s"),
+    )
+    motor_whine_db: float | None = Field(
+        default=None, ge=-60, le=0,
+        description="Motor/ESC whine level relative to the BPF fundamental "
+                    "(None = no whine tone)",
+        **_meta(unit="dB"),
+    )
+    whine_multiple: float = Field(
+        default=14.0, gt=0, le=100,
+        description="Whine frequency as a multiple of shaft rate (motor "
+                    "pole-pass order, e.g. 14 for a 14-pole outrunner)",
+    )
 
     @field_validator("initial_bearing")
     @classmethod
@@ -171,6 +304,13 @@ class DroneConfig(BaseModel):
 class SearchConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    coverage: Literal["window", "front_hemisphere", "full_sphere"] = Field(
+        default="window",
+        description="Search coverage preset. 'window' uses the explicit "
+                    "ranges below; the presets override them. Full sphere at "
+                    "2° is ~16k directions — consider 4° resolution. Note "
+                    "PSR/beamwidth are only comparable at equal coverage.",
+    )
     azimuth_range: list[float] = Field(
         default=[-60.0, 60.0],
         description="Azimuth search range [min, max] in degrees",
@@ -179,7 +319,9 @@ class SearchConfig(BaseModel):
     )
     elevation_range: list[float] = Field(
         default=[-60.0, 60.0],
-        description="Elevation search range [min, max] in degrees",
+        description="Elevation search range [min, max] in degrees "
+                    "(polar angle from boresight: 90° = ring plane, "
+                    "180° = behind the array)",
         min_length=2, max_length=2,
         **_meta(unit="deg"),
     )
@@ -197,6 +339,16 @@ class SearchConfig(BaseModel):
         if v[0] >= v[1]:
             raise ValueError(f"[0] ({v[0]}) must be less than [1] ({v[1]})")
         return v
+
+    @model_validator(mode="after")
+    def _apply_coverage(self):
+        if self.coverage == "front_hemisphere":
+            self.azimuth_range = [-180.0, 180.0]
+            self.elevation_range = [0.0, 90.0]
+        elif self.coverage == "full_sphere":
+            self.azimuth_range = [-180.0, 180.0]
+            self.elevation_range = [0.0, 180.0]
+        return self
 
 
 class DetectionConfig(BaseModel):
@@ -387,6 +539,21 @@ class TurbulenceConfig(BaseModel):
         default=0.1, ge=0, le=1,
         description="Scintillation strength (0–1, higher = stronger fading)",
     )
+    phase_jitter_std_us: float = Field(
+        default=15.0, ge=0, le=1000,
+        description="Turbulence-induced arrival-time jitter std",
+        **_meta(unit="µs"),
+    )
+    phase_jitter_corr_ms: float = Field(
+        default=50.0, gt=0, le=10000,
+        description="Correlation time of the arrival-time jitter (AR(1))",
+        **_meta(unit="ms"),
+    )
+    scintillation_corr_ms: float = Field(
+        default=50.0, gt=0, le=10000,
+        description="Correlation time of amplitude scintillation",
+        **_meta(unit="ms"),
+    )
 
 
 class NoiseConfig(BaseModel):
@@ -418,6 +585,35 @@ class NoiseConfig(BaseModel):
     ambient_db: float = Field(
         default=0.0, ge=0, le=120,
         description="Broadband ambient noise floor",
+        **_meta(unit="dB SPL"),
+    )
+    corcos_alpha_xi: float = Field(
+        default=0.15, gt=0, le=5,
+        description="Corcos streamwise coherence decay for wind noise",
+    )
+    corcos_alpha_eta: float = Field(
+        default=0.75, gt=0, le=5,
+        description="Corcos cross-stream coherence decay for wind noise",
+    )
+    traffic_distance_m: float = Field(
+        default=50.0, gt=0,
+        description="Distance of the traffic noise source from the array",
+        **_meta(unit="m"),
+    )
+    bird_distance_m: float = Field(
+        default=10.0, gt=0,
+        description="Distance of the bird noise source from the array",
+        **_meta(unit="m"),
+    )
+    windscreen_il_db: float = Field(
+        default=0.0, ge=0, le=60,
+        description="Windscreen insertion loss applied to wind noise "
+                    "(calibrated mode; 0 = bare mic, foam ball ~15-25)",
+        **_meta(unit="dB"),
+    )
+    bird_spl_db: float = Field(
+        default=90.0, ge=40, le=130,
+        description="Bird chirp source level at 1 m (calibrated mode)",
         **_meta(unit="dB SPL"),
     )
 
@@ -486,13 +682,160 @@ class OutputConfig(BaseModel):
     )
 
 
+class McuAudioIO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    n_tdm_buses: int = Field(
+        ge=0, le=16,
+        description="TDM-capable audio RX interfaces (SAI/I2S peripherals) "
+                    "usable for microphone capture",
+    )
+    max_slots_per_bus: int = Field(
+        ge=1, le=32,
+        description="TDM slots supported per bus by the peripheral",
+    )
+    max_frame_bits: int = Field(
+        ge=32, le=1024,
+        description="Maximum TDM frame length in bit clocks (STM32 SAI: 256, "
+                    "so only 8 × 32-bit slots per frame natively)",
+    )
+    max_bit_clock_hz: float = Field(
+        gt=0,
+        description="Maximum TDM bit clock (SCK) the peripheral can run",
+        **_meta(unit="Hz"),
+    )
+
+
+class McuProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Profile identifier (e.g. 'stm32h753')")
+    clock_hz: float = Field(
+        gt=0,
+        description="Core clock frequency",
+        **_meta(unit="Hz"),
+    )
+    macs_per_cycle: float = Field(
+        gt=0, le=8,
+        description="Sustained complex MACs per cycle (CMSIS-DSP class "
+                    "throughput; 1.0 for Cortex-M7 float32)",
+    )
+    sram_bytes: int = Field(
+        gt=0,
+        description="Usable SRAM after stacks/OS buffers",
+        **_meta(unit="B"),
+    )
+    flash_bytes: int = Field(
+        gt=0,
+        description="Usable non-volatile storage for tables (internal flash "
+                    "or external, whichever holds constant data)",
+        **_meta(unit="B"),
+    )
+    audio: McuAudioIO = Field(
+        description="Audio input (TDM/SAI) capability — a profile that "
+                    "cannot physically ingest the array's mics must fail",
+    )
+
+
+class LogMelConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = Field(
+        default=True,
+        description="Include the log-mel + transmission stages in the "
+                    "MCU requirement estimate (cost model only; the "
+                    "classifier itself lives in the C2 codebase)",
+    )
+    n_mels: int = Field(
+        default=64, ge=8, le=256,
+        description="Mel bands per frame",
+    )
+    fft_size: int | None = Field(
+        default=None, gt=0,
+        description="Log-mel FFT size (None = reuse the SRP-PHAT FFT)",
+    )
+    hop_length: int | None = Field(
+        default=None, gt=0,
+        description="Log-mel hop length (None = reuse the SRP-PHAT hop)",
+    )
+    bits_per_bin: int = Field(
+        default=8, ge=4, le=32,
+        description="Quantization of each transmitted mel bin",
+    )
+    channels: int = Field(
+        default=1, ge=1, le=64,
+        description="Audio channels transformed/transmitted (1 = mixdown)",
+    )
+
+    @field_validator("fft_size")
+    @classmethod
+    def _power_of_two(cls, v):
+        if v is not None and (v & (v - 1)) != 0:
+            raise ValueError(f"fft_size must be a power of 2, got {v}")
+        return v
+
+
+class McuConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = Field(
+        default=False,
+        description="Emit per-target MCU feasibility in reports/sweeps",
+    )
+    headroom_pct: float = Field(
+        default=30.0, ge=0, le=90,
+        description="Compute headroom reserved for control/comms/ISRs when "
+                    "sizing the required clock",
+        **_meta(unit="%"),
+    )
+    targets: list[str] = Field(
+        default=["stm32h753"],
+        description="MCU profiles to evaluate, in preference order "
+                    "(built-in library names or custom_profiles names)",
+    )
+    custom_profiles: list[McuProfile] = Field(
+        default_factory=list,
+        description="User-defined MCU profiles (override built-ins by name)",
+    )
+    logmel: LogMelConfig = Field(
+        default_factory=LogMelConfig,
+        description="Log-mel transform + uplink cost-model parameters",
+    )
+    link_overhead_pct: float = Field(
+        default=20.0, ge=0, le=200,
+        description="Protocol/framing overhead on the log-mel uplink",
+        **_meta(unit="%"),
+    )
+    mic_max_sck_hz: float = Field(
+        default=24.576e6, gt=0,
+        description="Microphone TDM SCK ceiling (ICS-52000 datasheet "
+                    "validates 24.576 MHz = 16 mics × 32 SCK × 48 kHz); "
+                    "binds the bus bit-clock budget together with the "
+                    "peripheral limit",
+        **_meta(unit="Hz"),
+    )
+    slot_bits: int = Field(
+        default=32, ge=16, le=32,
+        description="TDM slot width in bit clocks (ICS-52000 frames are "
+                    "n × 32 SCK, n a power of two ≥ the mics on the bus)",
+    )
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    array: ArrayConfig = Field(
-        default_factory=ArrayConfig,
+    array: AnyArrayConfig = Field(
+        default_factory=DualRingArrayConfig,
         description="Array geometry parameters",
     )
+
+    @field_validator("array", mode="before")
+    @classmethod
+    def _default_array_type(cls, v):
+        # Old YAML has no 'type' key; treat it as the original dual-ring.
+        if isinstance(v, dict) and "type" not in v:
+            return {**v, "type": "dual_ring"}
+        return v
     signal: SignalConfig = Field(
         default_factory=SignalConfig,
         description="Signal generation parameters",
@@ -516,6 +859,11 @@ class Config(BaseModel):
     output: OutputConfig = Field(
         default_factory=OutputConfig,
         description="Output and visualization settings",
+    )
+    mcu: McuConfig = Field(
+        default_factory=McuConfig,
+        description="MCU requirement estimation (per-stage compute/memory/"
+                    "I/O budgets matched against target profiles)",
     )
 
     @classmethod
@@ -559,16 +907,33 @@ class Config(BaseModel):
         return Config._from_dict(base)
 
 
+def _union_models(annotation) -> list[type]:
+    """BaseModel members of a (possibly Annotated) union annotation."""
+    from typing import get_args
+    args = get_args(annotation)
+    return [a for a in args if isinstance(a, type) and issubclass(a, BaseModel)]
+
+
 def _schema_lines(model_cls: type, lines: list[str], indent: int) -> None:
     prefix = "  " * indent
     for name, field_info in model_cls.model_fields.items():
-        if field_info.annotation and isinstance(field_info.annotation, type) and issubclass(field_info.annotation, BaseModel):
+        annotation = field_info.annotation
+        union_members = _union_models(annotation)
+        if annotation and isinstance(annotation, type) and issubclass(annotation, BaseModel):
             lines.append(f"{prefix}# {name} ...")
             lines.append(f"{prefix}{name}:")
-            _schema_lines(field_info.annotation, lines, indent + 1)
+            _schema_lines(annotation, lines, indent + 1)
+        elif len(union_members) > 1:
+            variants = ", ".join(
+                str(m.model_fields["type"].default) for m in union_members
+                if "type" in m.model_fields
+            )
+            lines.append(f"{prefix}# {name}: one of type: {variants} (showing default)")
+            lines.append(f"{prefix}{name}:")
+            _schema_lines(union_members[0], lines, indent + 1)
         else:
-            type_hint = getattr(field_info.annotation, "__name__", str(field_info.annotation))
-            default = field_info.default if field_info.default is not MISSING else field_info.default_factory() if field_info.default_factory is not MISSING else "REQUIRED"
+            type_hint = getattr(annotation, "__name__", str(annotation))
+            default = field_info.get_default(call_default_factory=True)
             lines.append(f"{prefix}# {name}: {type_hint}  (default: {default})")
             lines.append(f"{prefix}{name}: {default}")
 

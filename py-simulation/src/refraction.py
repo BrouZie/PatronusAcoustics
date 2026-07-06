@@ -1,5 +1,7 @@
 import numpy as np
 
+from .constants import speed_of_sound
+
 
 class RefractionModel:
     """Atmospheric refraction from wind and temperature gradients.
@@ -11,8 +13,6 @@ class RefractionModel:
     Temperature profile: linear lapse rate.
     Effective sound speed: c_eff(z) = c(T(z)) + u(z)·cos(θ_source_to_receiver)
     """
-
-    C0 = 343.0
 
     def __init__(self, wind_shear_ms_per_m=0.0,
                  temperature_lapse_rate=-0.0065,
@@ -34,7 +34,7 @@ class RefractionModel:
         return T0_C + self.temperature_lapse_rate * z
 
     def sound_speed(self, T_C):
-        return 331.3 * np.sqrt(1.0 + T_C / 273.15)
+        return speed_of_sound(T_C)
 
     def effective_sound_speed(self, z, T0_C, u_ref, cos_theta=1.0):
         T_z = self.temperature_profile(z, T0_C)

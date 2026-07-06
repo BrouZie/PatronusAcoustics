@@ -39,4 +39,25 @@ src/_srp$(PY_SUFFIX): src/cpp/srp.cpp
 clean:
 	rm -f src/_propagate*.so src/_noise*.so src/_srp*.so
 
-.PHONY: all build clean
+# The fabrication trade: dual ring at 3 spacings vs a 16-mic planar ring at
+# equal mic budget. Tens of minutes cold; cached runs make re-runs cheap.
+compare-baseline:
+	uv run python -m src.compare \
+	  config/compare/dual_ring_s05.yaml \
+	  config/compare/dual_ring_s20.yaml \
+	  config/compare/dual_ring_s30.yaml \
+	  config/compare/single_ring_16.yaml \
+	  --distances 10 20 30 50 70
+
+compare-baseline-quick:
+	uv run python -m src.compare \
+	  config/compare/dual_ring_s05.yaml \
+	  config/compare/dual_ring_s20.yaml \
+	  config/compare/dual_ring_s30.yaml \
+	  config/compare/single_ring_16.yaml \
+	  --distances 10 30 50 --seeds 1 --quick
+
+test:
+	uv run python -m pytest tests/ -q
+
+.PHONY: all build clean compare-baseline compare-baseline-quick test

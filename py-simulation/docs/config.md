@@ -1,56 +1,58 @@
 # Configuration System
 
-The simulation uses YAML configuration files validated through a hierarchy of **Pydantic v2 `BaseModel`** classes (`Config`, `ArrayConfig`, `SignalConfig`, `DroneConfig`, `SRPPhatConfig`, `EnvironmentConfig`, `OutputConfig`) in the `src/config/` package.
-
-Formerly a single `config.py` with hand-rolled frozen dataclasses (48 `_check()` methods), the config system was migrated to Pydantic v2. The `src/config/` package now contains:
+The simulation uses YAML configuration files validated through a hierarchy of **Pydantic v2 `BaseModel`** classes in the `src/config/` package.
 
 | File | Purpose |
 |---|---|
 | `__init__.py` | Re-exports all models, `deep_merge`, `parse_dotted_key`, `config_hash` |
-| `models.py` | 15 Pydantic `BaseModel` classes with `Field(ge=..., le=..., description=...)`, `json_schema_extra` for unit metadata |
-| `merge.py` | `deep_merge()`, `parse_dotted_key()` (unchanged from legacy) |
-| `hash.py` | `config_hash()` — SHA-256 of JSON-serialized config dict |
+| `models.py` | Pydantic models with `Field(ge=..., le=..., description=...)`, `json_schema_extra` for unit metadata; the array-config union |
+| `merge.py` | `deep_merge()`, `parse_dotted_key()` |
+| `hash.py` | `config_hash()` — SHA-256 of the JSON-serialized config dict (keys the results cache) |
 
 ## Loading Order
 
 1. **YAML file** → raw dict via `yaml.safe_load()`
 2. **CLI overrides** → nested override dict via `apply_overrides()` (e.g., `--snr 25`, `--quick`, `--ring1-radius 0.5`)
-3. **Deep merge** → `deep_merge(base_dict, overrides)` applies CLI flags on top of file values
+3. **Deep merge** → `deep_merge(base_dict, overrides)`
 4. **Pydantic construction** → `Config.from_dict(merged_dict)` validates and structures the result
 
-### Validation
+## Array Config Union
 
-Pydantic `@field_validator` methods enforce:
-- `signal.fs` must be a power of 2
-- `srpphat.mode` in `{"phat", "standard"}`
-- `detection.method` in `{"peak_to_mean", "peak_to_sidelobe", "threshold"}`
-- `noise.traffic_density` in `{"none", "light", "moderate", "heavy"}`
-- `drone.initial_bearing` has both `azimuth_deg` and `elevation_deg` when present
-- `srpphat.search.range_deg` is ordered `[min, max]`
+`array` is a discriminated union on `array.type`:
 
-Pydantic `@model_validator(mode="after")` enforces cross-field constraints:
-- `srpphat` hop_length ≤ fft_size, min_freq < max_freq
-- `drone.motion` velocity vector has correct length (0, 2, or 3)
+| Type | Model | Fields |
+|---|---|---|
+| `dual_ring` (default) | `DualRingArrayConfig` | `ring1_radius`, `ring2_radius`, `n_mics_ring1`, `n_mics_ring2`, `ring_spacing` |
+| `single_ring` | `SingleRingArrayConfig` | `radius`, `n_mics`, `z_offset` |
+| `xyz` | `ArbitraryArrayConfig` | `positions` (list of `[x,y,z]`) **or** `csv_path` (exactly one) |
+
+- YAML without a `type` key validates as `dual_ring` (backward compatible).
+- Array models use `extra="forbid"` — unknown keys are rejected instead of silently dropped.
+- `ArrayConfig` remains as an alias of `DualRingArrayConfig` for existing code.
+- `deep_merge` cannot switch union variants (it would mix incompatible keys); to change the type, replace the whole `array:` section — `src/compare.py` does this automatically for its override fragments.
+
+## Validation Highlights
+
+`@field_validator` / `@model_validator` enforce, among others:
+- `srpphat.fft_size` power of 2; `hop_length ≤ fft_size`; `min_freq < max_freq`
+- `srpphat.search` ranges ordered `[min, max]`; `coverage` presets (`front_hemisphere`, `full_sphere`) overwrite the explicit ranges
+- `detection.method`, `srpphat.mode`, `noise.traffic_density`, `ground.model` enums
+- `drone.initial_bearing` must contain `azimuth_deg` and `elevation_deg`
+- `array` xyz variant: exactly one of `positions`/`csv_path`, ≥ 2 mics
 
 ## Schema Generation
-
-The full configuration schema can be dumped as human-readable text:
 
 ```bash
 python -m src.main --dump-schema
 ```
 
-Programmatic access:
-
 ```python
 from src.config import Config
-
-# Pydantic JSON Schema (with units in json_schema_extra)
-schema = Config.model_json_schema()
-
-# Custom human-readable text schema
-text = Config.schema()
+schema = Config.model_json_schema()   # JSON Schema (with unit metadata)
+text = Config.schema()                # human-readable text schema
 ```
+
+The dashboard's configuration form is generated from `model_json_schema()`, including the array-type selector for the union.
 
 ## Sweep Overrides
 
@@ -60,25 +62,22 @@ The sweep runner (`src/sweep.py`) follows the same pattern:
 base YAML → deep_merge(overrides) → deep_merge(sweep_combo) → Config.from_dict()
 ```
 
-Where `overrides` are fixed modifications and `sweep_combo` is one Cartesian-product element from the `sweep:` parameter lists.
-
 ## Utilities
 
-- **`deep_merge(base, override)`** — recursive dict merge; nested dicts are merged, scalars/arrays override
-- **`parse_dotted_key("ground.coeff", 0.03)`** — converts dot-notation to `{ground: {coeff: 0.03}}`
-- **`Config.from_dict(data)`** — constructs full Pydantic model tree from a raw dict, applying defaults for missing keys
-- **`config_hash(config)`** — deterministic SHA-256 fingerprint (12 hex chars) of a Config, used by the simulation cache
+- **`deep_merge(base, override)`** — recursive dict merge; nested dicts merge, scalars/arrays override (note: an empty dict override merges nothing — it cannot *clear* a section)
+- **`parse_dotted_key("environment.ground.height_m", 3.0)`** — dot-notation to nested dict
+- **`config_hash(config)`** — deterministic 12-hex-char fingerprint; identical configs share cached results. Any model change (even adding a defaulted field) changes all hashes; physics changes without config changes are handled by `CACHE_SCHEMA_VERSION` in `src/results/cache.py`.
 
 ## Config Sections
 
 | Section | Pydantic Model | Key Parameters |
 |---|---|---|
-| `array` | `ArrayConfig` | ring radii, mic counts, ring spacing |
-| `signal` | `SignalConfig` | fs, duration, snr_db, drone_spl_db |
-| `mic` | `MicConfig` | snr_dba, sensitivity_dbFS, aop_db_spl |
-| `drone` | `DroneConfig` | rpm, blades, rotors, distance, trajectory, motion |
-| `srpphat` | `SRPPhatConfig` | fft_size, hop_length, search grid, max_freq, mode, detection |
-| `environment` | `EnvironmentConfig` | ground params, noise params (wind/traffic/birds/ambient) |
+| `array` | union (see above) | geometry |
+| `signal` | `SignalConfig` | `fs`, `duration`, `snr_db` (None = EIN budget), `drone_spl_db`, `seed` (reproducible runs) |
+| `mic` | `MicConfig` | `snr_dba`, `sensitivity_dbFS`, `aop_db_spl`, `imperfections` (gain/phase/position/quantization/failed mics/seed) |
+| `drone` | `DroneConfig` | `rpm`, `num_blades`, `num_rotors`, `distance`, `initial_bearing`, `trajectory`, `bpf_harmonics` |
+| `srpphat` | `SRPPhatConfig` | `fft_size`, `hop_length`, `search` (incl. `coverage`), `min/max_freq`, `mode`, `detection` |
+| `environment` | `EnvironmentConfig` | `enabled`, `ground`, `noise` (wind/traffic/birds/ambient + Corcos alphas + source distances), `atmospheric` (drives speed of sound + absorption), `refraction`, `turbulence` (incl. phase-jitter and scintillation time constants) |
 | `output` | `OutputConfig` | animation/figure/data save flags |
 
 ## Override Precedence
@@ -89,19 +88,14 @@ CLI flags > sweep parameters > sweep overrides > YAML file > Pydantic model defa
 
 | File | Purpose |
 |---|---|
-| `config/default.yaml` | Full reference config (environment disabled) |
-| `config/benchmark.yaml` | Minimal 2s stationary benchmark (fast) |
-| `config/noisy_oscillating.yaml` | Realistic default: oscillating drone + environment |
-| `config/oscillating_drone.yaml` | Oscillating trajectory, environment disabled |
-| `config/moving_drone.yaml` | Flyby trajectory, environment disabled |
-| `config/prototype.yaml` | Oscillating + environment (coeff=0.05, light traffic) |
-| `config/16_prototype.yaml` | 16+16 mic array + environment |
-| `config/sweep/mounting_height.yaml` | Sweep: mounting height × ground model |
-| `config/sweep/gate_threshold.yaml` | Sweep: detection PSR threshold |
-| `config/sweep/freq_band.yaml` | Sweep: SRP frequency band limits |
-| `config/sweep/detection_range.yaml` | Sweep: detection range (full band, 0–3000 Hz) |
-| `config/sweep/detection_range_optimal.yaml` | Sweep: detection range (optimal band, 500–2000 Hz) |
-
-## Legacy
-
-The old `src/config.py` (frozen dataclasses) has been deleted. All imports route through `src.config` which now points to the `src/config/` package. No backward-compatibility shims are provided.
+| `config/default.yaml` | Full realistic reference: environment enabled, oscillating drone, ICS-52000 imperfections |
+| `config/quick.yaml` | Fast iteration: 4 s, 4° grid, 2 kHz, no output files |
+| `config/benchmark.yaml` | Minimal stationary benchmark |
+| `config/compare/*.yaml` | Geometry fragments for `src.compare` (dual-ring spacings, 16-mic single ring) |
+| `config/sweep/ring_spacing_vs_range.yaml` | The fabrication question: spacing × distance |
+| `config/sweep/ring_spacing_frontback.yaml` | Spacing × distance at full-sphere coverage → front/back metrics |
+| `config/sweep/detection_range*.yaml` | Distance sweeps (full vs optimal band) |
+| `config/sweep/mounting_height.yaml` | Height × ground model |
+| `config/sweep/gate_threshold.yaml` | Detection threshold |
+| `config/sweep/freq_band.yaml` | SRP band limits |
+| `config/sweep/array.yaml`, `atmospheric.yaml`, `distance.yaml`, `ground.yaml` | Further single-topic sweeps |
