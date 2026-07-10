@@ -1,10 +1,15 @@
-"""Tests for triangulation geometry and the MCU compute budget."""
+"""Tests for triangulation geometry and the MCU requirements engine."""
 
 import unittest
 
 import numpy as np
 
-from src.analysis.mcu_budget import estimate, estimate_from_config
+from src.analysis.mcu_requirements import (
+    PHASE_TABLE_BYTES,
+    compute_requirements,
+    evaluate_from_config,
+    reference_stage_cycles,
+)
 from src.analysis.triangulation import (
     position_error_map,
     triangulate,
@@ -45,8 +50,15 @@ class TestTriangulate(unittest.TestCase):
         self.assertGreater(far, near)
 
 
-class TestMcuBudget(unittest.TestCase):
-    def test_memory_matches_actual_phase_tensor(self):
+class TestMcuRequirementsCrossCheck(unittest.TestCase):
+    def _cfg(self, resolution_deg=4.0):
+        return Config.from_dict({
+            "srpphat": {"search": {"resolution_deg": resolution_deg}},
+            "mcu": {"enabled": True, "targets": ["stm32h753"],
+                    "logmel": {"enabled": False}},
+        })
+
+    def test_phase_table_matches_actual_processor_tensor(self):
         from src.config import DualRingArrayConfig, SearchConfig, DetectionConfig
         from src.geometry import DualRingArray
         from src.srpphat import SRPPhatProcessor
@@ -59,32 +71,25 @@ class TestMcuBudget(unittest.TestCase):
             search_config=search, max_freq=4000.0,
             detection_config=DetectionConfig(enabled=False),
         )
-        # Match the processor's actual dtype (complex128 when the C++
-        # extension is built, complex64 on the pure-numpy path).
-        budget = estimate(
-            n_mics=array.n_mics, fft_size=2048, hop_length=512, fs=48000,
-            n_directions=srp.n_directions, max_freq=4000.0,
-            dtype_bytes=srp.phase.itemsize,
-        )
-        self.assertEqual(budget.n_freqs_used, srp.n_freqs_used)
-        actual_mb = srp.phase.nbytes / 2 ** 20
-        self.assertAlmostEqual(budget.phase_tensor_mb, actual_mb, delta=0.01)
+        req = compute_requirements(self._cfg(), n_mics=array.n_mics)
+        table = next(c for c in req.stages[0].ram
+                     if c.name == "phase_table")
+        # The engine assumes complex64 on target; the processor may use
+        # complex128 when the C++ extension is built — compare element
+        # counts, then bytes at the on-target dtype.
+        n_elements = srp.phase.nbytes / srp.phase.itemsize
+        self.assertEqual(table.bytes, n_elements * PHASE_TABLE_BYTES)
 
-    def test_more_directions_cost_more(self):
-        small = estimate(16, 2048, 512, 48000, 1000, 4000.0)
-        large = estimate(16, 2048, 512, 48000, 16000, 4000.0)
-        self.assertGreater(large.macs_per_frame, small.macs_per_frame)
-        self.assertGreater(large.phase_tensor_mb, small.phase_tensor_mb)
+    def test_finer_grid_costs_more(self):
+        coarse = compute_requirements(self._cfg(8.0), 16)
+        fine = compute_requirements(self._cfg(2.0), 16)
+        self.assertGreater(
+            reference_stage_cycles(fine.stages[0]),
+            reference_stage_cycles(coarse.stages[0]))
+        self.assertGreater(fine.ram_bytes, coarse.ram_bytes)
 
     def test_huge_grid_flagged_infeasible(self):
-        huge = estimate(16, 2048, 512, 48000, 40000, 4000.0)
-        self.assertFalse(huge.fits_memory)
-        self.assertFalse(huge.fits_h753)
-
-    def test_estimate_from_config(self):
-        cfg = Config.from_dict({
-            "srpphat": {"search": {"resolution_deg": 4.0}},
-        })
-        budget = estimate_from_config(cfg, n_mics=16)
-        self.assertGreater(budget.n_directions, 0)
-        self.assertIn("MB", budget.summary())
+        report = evaluate_from_config(self._cfg(1.0), n_mics=16)
+        verdict = report.verdicts[0]
+        self.assertFalse(verdict.fits_ram)
+        self.assertFalse(verdict.fits)

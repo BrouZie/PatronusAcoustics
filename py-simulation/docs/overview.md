@@ -58,7 +58,7 @@ YAML Config → Pydantic Config (src/config/) → Simulation.run()
 | `beampattern.py` | Analytical DAS beampattern for any `ArrayGeometry` (`python -m src.beampattern -c <cfg>`); reused by dashboard + compare |
 | `main.py` | CLI entry point, `run_simulation()`, `apply_overrides()` |
 | `sweep.py` | YAML-driven parameter sweep runner with checkpoint/resume |
-| `analysis/` | `detection_range` (range curves, `range_at_rate`), `triangulation` (two-station Monte Carlo), `mcu_budget` (H753 feasibility) |
+| `analysis/` | `detection_range` (range curves, `range_at_rate`), `triangulation` (two-station Monte Carlo), `mcu_requirements`/`mcu_profiles` (multi-target MCU feasibility) |
 | `compare.py` | Geometry comparison CLI → `report.md` + decision plots (`make compare-baseline`) |
 | `visualize.py` / `visualize_3d.py` | Summary figures, 3D beamsphere animation (geometry-agnostic) |
 | `results/` | `SweepCatalog` (sweep discovery), versioned `cached_run()` cache with `prune_cache()` |

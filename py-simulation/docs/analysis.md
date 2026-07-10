@@ -35,25 +35,17 @@ Output under `results/compare_<timestamp>/`:
 
 | File | Content |
 |---|---|
-| `report.md` | Summary table: mics, `range@90%`, `range@50%`, error @ 30 m, mirror suppression, **MCU (H753) feasibility** |
+| `report.md` | Summary table: mics, `range@90%`, `range@50%`, error @ 30 m, mirror suppression, **MCU feasibility for the first configured target** |
 | `detection_rate_vs_range.png` | One line per geometry, 90 %/50 % guides, shaded 10–50 m pitch target |
 | `angular_error_vs_range.png` / `mirror_suppression_vs_range.png` | Accuracy and front/back rejection vs distance |
 | `beampattern_cuts.png` | Analytical boresight cuts at 400/1000/2000 Hz per geometry |
 | `geometries.png` | 3D mic-position scatter per candidate |
 
-## MCU Budget (`src/analysis/mcu_budget.py`)
+## MCU Feasibility (`src/analysis/mcu_requirements.py`)
 
-Closed-form estimate of what SRP-PHAT costs on the station MCU: phase-table memory (`n_freqs × n_mics × n_dirs × 8 B`) and per-frame complex MACs vs the frame period, against stated NUCLEO-H753ZI assumptions (480 MHz, ~1 complex MAC/cycle with CMSIS-DSP, ~0.82 MB usable SRAM — adjust the constants when firmware measurements exist).
+Per-stage requirements (SRP-PHAT + log-mel + uplink), multi-target verdicts with named binding constraints, memory placement/bandwidth modeling, and the mic TDM ingest check — see [mcu.md](mcu.md) for the cycle model, calibration hooks, and profile provenance.
 
-```python
-from src.analysis import estimate_from_config
-budget = estimate_from_config(config, n_mics=16)
-print(budget.summary())   # e.g. "77.67 MB / 22.0 ms per 10.7 ms frame [MEMORY]"
-```
-
-The compare report evaluates this against each geometry's **station** search config (not the full-sphere research grid). Key standing result: the default research grid (±60° @ 2°, 4 kHz band, 16 mics) is far beyond the H753 — the on-station grid must be much coarser (higher `resolution_deg`, lower `max_freq`, higher `min_freq`).
-
-This module is kept as the stable single-target baseline. For per-stage requirements (SRP-PHAT + log-mel + uplink), multi-target verdicts with named binding constraints, and the mic TDM ingest check, use `src/analysis/mcu_requirements.py` — see [mcu.md](mcu.md).
+The compare report evaluates this against each geometry's **station** search config (not the full-sphere research grid). Key standing result: the default research grid (±60° @ 2°, 4 kHz band, 16 mics) is far beyond any single-MCU station — the on-station grid must be much coarser (higher `resolution_deg`, lower `max_freq`, higher `min_freq`).
 
 ## Two-Station Triangulation (`src/analysis/triangulation.py`)
 

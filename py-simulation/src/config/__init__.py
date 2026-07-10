@@ -24,6 +24,9 @@ from .models import (
     McuProfile,
     LogMelConfig,
     McuConfig,
+    McuCoreModel,
+    McuMemoryRegion,
+    McuCalibration,
 )
 from .merge import deep_merge, parse_dotted_key
 from .hash import config_hash
@@ -54,6 +57,9 @@ __all__ = [
     "McuProfile",
     "LogMelConfig",
     "McuConfig",
+    "McuCoreModel",
+    "McuMemoryRegion",
+    "McuCalibration",
     "deep_merge",
     "parse_dotted_key",
     "config_hash",

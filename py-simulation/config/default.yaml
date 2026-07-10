@@ -101,7 +101,9 @@ mcu:
   enabled: true
   headroom_pct: 30.0
   targets: [stm32h753]        # built-ins: stm32h753, stm32h747, stm32f446,
-                              # esp32s3, imxrt1176 (see docs/mcu.md)
+                              # esp32s3, imxrt1176, teensy41, teensy41_psram
+                              # (see docs/mcu.md; calibrate with
+                              # mcu.calibrations once hardware numbers exist)
   logmel:
     enabled: true
     n_mels: 64

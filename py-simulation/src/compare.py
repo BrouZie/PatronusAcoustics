@@ -21,11 +21,13 @@ import yaml
 
 from .analysis import (
     RangeCurve,
-    estimate_from_config,
     range_at_rate,
     run_range_curve,
 )
-from .analysis.mcu_requirements import evaluate_from_config as mcu_evaluate
+from .analysis.mcu_requirements import (
+    evaluate_from_config as mcu_evaluate,
+    reference_stage_cycles,
+)
 from .beampattern import array_response
 from .config import Config, deep_merge
 from .geometry import make_array
@@ -168,20 +170,23 @@ def _mcu_feasibility_lines(named_arrays, station_configs):
         lines += [
             f"### {label} ({array.n_mics} mics)",
             "",
-            f"Required: {req.required_mhz:.0f} MHz (at 1 MAC/cycle, "
-            f"{req.headroom_pct:.0f}% headroom) · "
+            f"Required: {req.required_mhz:.0f} MHz (reference M7 core, "
+            f"unbounded memory bandwidth, {req.headroom_pct:.0f}% headroom; "
+            f"per-target verdicts use each profile's own core and memory "
+            f"model) · "
             f"{req.ram_bytes / 2**20:.2f} MB RAM · "
             f"{req.flash_bytes / 2**10:.0f} KB flash · "
             f"{req.link_bps / 1e3:.1f} kbps uplink",
             "",
-            "| Stage | RAM | Flash | MMACs/s |",
+            "| Stage | RAM | Flash | MCycles/s (ref. core) |",
             "|---|---|---|---|",
         ]
         for s in req.stages:
+            mcps = reference_stage_cycles(s) / s.frame_period_s / 1e6
             lines.append(
                 f"| {s.name} | {s.ram_bytes / 2**20:.3f} MB "
                 f"| {s.flash_bytes / 2**10:.1f} KB "
-                f"| {s.macs_per_second / 1e6:.1f} |"
+                f"| {mcps:.1f} |"
             )
         lines += ["", "| Target | Verdict |", "|---|---|"]
         for v in report.verdicts:
@@ -195,7 +200,11 @@ def _write_report(out_dir, curves, named_arrays, station_configs, args):
     rows = []
     for curve, (label, array), station_cfg in zip(
             curves, named_arrays, station_configs):
-        budget = estimate_from_config(station_cfg, array.n_mics)
+        if station_cfg.mcu.enabled:
+            mcu_cell = (mcu_evaluate(station_cfg, array.n_mics)
+                        .verdicts[0].short_summary())
+        else:
+            mcu_cell = "—"
         rows.append((
             label,
             array.n_mics,
@@ -203,7 +212,7 @@ def _write_report(out_dir, curves, named_arrays, station_configs, args):
             _fmt(range_at_rate(curve, 0.5), " m"),
             _fmt(_err_at(curve, 30.0), "°"),
             _fmt(float(np.nanmean(curve.mirror_suppression_db)), " dB"),
-            budget.summary(),
+            mcu_cell,
         ))
 
     lines = [
@@ -218,7 +227,7 @@ def _write_report(out_dir, curves, named_arrays, station_configs, args):
         "(drone SPL − spreading − absorption − mic noise floor); the drone "
         "is stationary at the configured bearing.",
         "",
-        "| Geometry | Mics | Range@90% | Range@50% | Err@30 m | Mirror supp. | MCU (H753) |",
+        "| Geometry | Mics | Range@90% | Range@50% | Err@30 m | Mirror supp. | MCU (first target) |",
         "|---|---|---|---|---|---|---|",
     ]
     for r in rows:
@@ -227,9 +236,9 @@ def _write_report(out_dir, curves, named_arrays, station_configs, args):
         "",
         "Range@X% = interpolated distance where detection rate crosses X%; "
         "'—' means the curve never crossed inside the tested distances. "
-        "MCU column: phase-table memory and est. frame compute vs the frame "
-        "period for the *station's own* search grid (not the research "
-        "full-sphere grid used for the curves above).",
+        "MCU column: the first configured target's verdict (cycle model, "
+        "memory placement, TDM ingest) for the *station's own* search grid "
+        "(not the research full-sphere grid used for the curves above).",
         "",
     ]
     lines += _mcu_feasibility_lines(named_arrays, station_configs)

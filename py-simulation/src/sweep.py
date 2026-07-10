@@ -26,12 +26,7 @@ import csv
 import numpy as np
 import yaml
 
-from .analysis.mcu_profiles import BUILTIN_PROFILES
-from .analysis.mcu_requirements import (
-    compute_requirements,
-    evaluate_from_config,
-    evaluate_profile,
-)
+from .analysis.mcu_requirements import evaluate_from_config
 from .config import Config, config_hash, deep_merge, parse_dotted_key
 from .geometry import make_array
 from .main import run_simulation
@@ -59,30 +54,33 @@ METRIC_FIELDS = [
     "mcu_required_ram_mb",
     "mcu_link_kbps",
     "mcu_recommended",
-    "mcu_h753_ok",
+    "mcu_target",
+    "mcu_target_ok",
 ]
 
 
 def _mcu_metrics(config):
     """Analytic MCU requirement columns for one sweep row.
 
-    `mcu_h753_ok` is always judged against the built-in stm32h753 profile
-    so the column means the same thing in every sweep, regardless of
-    which targets are configured.
+    `mcu_target`/`mcu_target_ok` name and judge the first configured
+    target profile, so the boolean is always interpretable even when
+    sweeps run with different target lists.
     """
     n_mics = make_array(config.array).n_mics
-    req = compute_requirements(config, n_mics)
-    h753 = evaluate_profile(req, BUILTIN_PROFILES["stm32h753"])
     try:
-        recommended = evaluate_from_config(config, n_mics).recommended
+        report = evaluate_from_config(config, n_mics)
     except KeyError:
-        recommended = None
+        return {"mcu_recommended": None, "mcu_target": None,
+                "mcu_target_ok": None}
+    req = report.requirements
+    first = report.verdicts[0] if report.verdicts else None
     return {
         "mcu_required_mhz": round(req.required_mhz, 1),
         "mcu_required_ram_mb": round(req.ram_bytes / 2**20, 3),
         "mcu_link_kbps": round(req.link_bps / 1e3, 1),
-        "mcu_recommended": recommended,
-        "mcu_h753_ok": h753.fits,
+        "mcu_recommended": report.recommended,
+        "mcu_target": first.profile.name if first else None,
+        "mcu_target_ok": first.fits if first else None,
     }
 
 

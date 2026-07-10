@@ -18,6 +18,7 @@ API = (
     "TurbulenceConfig", "NoiseConfig", "EnvironmentConfig",
     "OutputConfig", "Config", "deep_merge", "parse_dotted_key",
     "McuAudioIO", "McuProfile", "LogMelConfig", "McuConfig",
+    "McuCoreModel", "McuMemoryRegion", "McuCalibration",
 )
 
 
@@ -706,6 +707,107 @@ class McuAudioIO(BaseModel):
     )
 
 
+class McuCoreModel(BaseModel):
+    """Op-cost table for one CPU core (defaults: Cortex-M7 float32)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cmacs_per_cycle: float = Field(
+        default=0.25, gt=0, le=8,
+        description="Compute-bound complex MACs per cycle (a complex MAC "
+                    "is 4 real FMAs; the M7 FPU issues 1 VFMA.F32/cycle)",
+    )
+    rmacs_per_cycle: float = Field(
+        default=1.0, gt=0, le=8,
+        description="Real FMAs per cycle",
+    )
+    rfft_cycles_per_nlogn: float = Field(
+        default=1.7, gt=0,
+        description="k in cycles ≈ k·N·log2(N) for an arm_rfft_fast_f32 "
+                    "class real FFT of size N",
+    )
+    div_cycles: float = Field(
+        default=14.0, gt=0,
+        description="Cycles per float division (VDIV.F32 on M7, "
+                    "non-pipelined)",
+    )
+    sqrt_cycles: float = Field(
+        default=14.0, gt=0,
+        description="Cycles per float square root (VSQRT.F32 on M7)",
+    )
+    log_cycles: float = Field(
+        default=25.0, gt=0,
+        description="Cycles per logf() call (polynomial approximation)",
+    )
+
+
+class McuMemoryRegion(BaseModel):
+    """One addressable memory region with its sustained read bandwidth."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description="Region identifier (e.g. 'dtcm', 'ocram2', 'psram', "
+                    "'flash_xip')",
+    )
+    size_bytes: int = Field(
+        gt=0,
+        description="Usable capacity of the region",
+        **_meta(unit="B"),
+    )
+    read_bytes_per_cycle: float = Field(
+        gt=0,
+        description="Sustained streaming read bandwidth per core cycle "
+                    "(zero-reuse access pattern, cache misses included)",
+    )
+    writable: bool = Field(
+        default=True,
+        description="False for execute/read-only regions (flash XIP): "
+                    "only constant tables may be placed there",
+    )
+
+
+class McuCalibration(BaseModel):
+    """Measured on-device benchmark results that override analytic costs.
+
+    Any field left unset falls back to the next source in precedence
+    order: config-level calibration > profile-level calibration >
+    analytic core/memory model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    measured_on: str | None = Field(
+        default=None,
+        description="Provenance: board, firmware commit, date",
+    )
+    rfft_cycles: dict[int, int] = Field(
+        default_factory=dict,
+        description="Measured real-FFT cycles by FFT size; uncalibrated "
+                    "sizes scale from the nearest measured size by the "
+                    "N·log2(N) ratio",
+    )
+    steering_cmacs_per_cycle: float | None = Field(
+        default=None, gt=0,
+        description="Measured end-to-end steering-einsum throughput with "
+                    "the phase table in its intended region (overrides "
+                    "the min(compute, bandwidth) estimate)",
+    )
+    region_bytes_per_cycle: dict[str, float] = Field(
+        default_factory=dict,
+        description="Measured sustained stream bandwidth per memory "
+                    "region name",
+    )
+    div_cycles: float | None = Field(default=None, gt=0)
+    sqrt_cycles: float | None = Field(default=None, gt=0)
+    log_cycles: float | None = Field(default=None, gt=0)
+    overhead_cycles_per_frame: float | None = Field(
+        default=None, ge=0,
+        description="Measured per-frame RTOS/DMA/ISR overhead; replaces "
+                    "the sched_overhead_cycles + isr_cycles model",
+    )
+
+
 class McuProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -715,10 +817,15 @@ class McuProfile(BaseModel):
         description="Core clock frequency",
         **_meta(unit="Hz"),
     )
-    macs_per_cycle: float = Field(
-        gt=0, le=8,
-        description="Sustained complex MACs per cycle (CMSIS-DSP class "
-                    "throughput; 1.0 for Cortex-M7 float32)",
+    macs_per_cycle: float | None = Field(
+        default=None, gt=0, le=8,
+        description="DEPRECATED: sustained complex MACs per cycle. Mapped "
+                    "onto core.cmacs_per_cycle when core is not explicitly "
+                    "set; prefer configuring `core`",
+    )
+    core: McuCoreModel = Field(
+        default_factory=McuCoreModel,
+        description="Core op-cost model (defaults are Cortex-M7 float32)",
     )
     sram_bytes: int = Field(
         gt=0,
@@ -731,10 +838,30 @@ class McuProfile(BaseModel):
                     "or external, whichever holds constant data)",
         **_meta(unit="B"),
     )
+    memory_regions: list[McuMemoryRegion] | None = Field(
+        default=None,
+        description="Memory regions for placement/bandwidth modeling. "
+                    "None synthesizes a single region from sram_bytes "
+                    "with bandwidth that never binds (legacy semantics)",
+    )
+    calibration: McuCalibration | None = Field(
+        default=None,
+        description="Measured benchmark results baked into the profile",
+    )
+    notes: str | None = Field(
+        default=None,
+        description="Fidelity caveats surfaced in reports",
+    )
     audio: McuAudioIO = Field(
         description="Audio input (TDM/SAI) capability — a profile that "
                     "cannot physically ingest the array's mics must fail",
     )
+
+    @model_validator(mode="after")
+    def _map_deprecated_macs(self):
+        if self.macs_per_cycle is not None and "core" not in self.model_fields_set:
+            self.core = McuCoreModel(cmacs_per_cycle=self.macs_per_cycle)
+        return self
 
 
 class LogMelConfig(BaseModel):
@@ -796,6 +923,21 @@ class McuConfig(BaseModel):
     custom_profiles: list[McuProfile] = Field(
         default_factory=list,
         description="User-defined MCU profiles (override built-ins by name)",
+    )
+    calibrations: dict[str, McuCalibration] = Field(
+        default_factory=dict,
+        description="Measured benchmark overrides by profile name (applies "
+                    "field-wise on top of built-in or custom profiles)",
+    )
+    sched_overhead_cycles: float = Field(
+        default=2000.0, ge=0,
+        description="Modeled RTOS tick + control-loop cycles per SRP frame "
+                    "(known overhead; headroom_pct covers unknowns)",
+    )
+    isr_cycles: float = Field(
+        default=400.0, ge=0,
+        description="Cycles per DMA half/complete interrupt; charged "
+                    "2 × required buses per frame",
     )
     logmel: LogMelConfig = Field(
         default_factory=LogMelConfig,

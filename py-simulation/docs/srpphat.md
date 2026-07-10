@@ -22,7 +22,7 @@ where `τ[m, d]` is the steering delay for mic `m` toward direction `d`, compute
 | full sphere @ 4° | 91×46 = 4 186 | ~87 MB | ~175 MB |
 | full sphere @ 2° | 181×91 = 16 471 | ~344 MB | ~688 MB |
 
-The same formula drives the on-station MCU feasibility estimates (`src/analysis/mcu_budget.py` for the H753 baseline; `src/analysis/mcu_requirements.py` for per-stage, multi-target verdicts — see [mcu.md](mcu.md)).
+The same formula drives the on-station MCU feasibility estimates (`src/analysis/mcu_requirements.py` — per-stage, multi-target verdicts with memory placement; see [mcu.md](mcu.md)).
 
 ## Search Coverage
 

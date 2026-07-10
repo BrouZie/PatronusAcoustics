@@ -18,7 +18,7 @@ streamlit run src/dashboard/app.py
 - **Pluggable array geometry** — dual ring (default), single ring, or arbitrary XYZ positions (`array.type` in config); all run through the identical pipeline
 - **SRP-PHAT beamforming** — vectorized via `np.einsum` with precomputed phase tensor; window / front-hemisphere / **full-sphere** search coverage
 - **Front/back rejection metrics** — mirror-lobe suppression and confusion rate quantify what the axial ring separation actually buys (the core dual-ring design question)
-- **Geometry comparison reports** — `python -m src.compare geomA.yaml geomB.yaml` → detection-rate-vs-range curves, range@90%/range@50%, beampattern cuts, and an H753 MCU memory/compute feasibility column
+- **Geometry comparison reports** — `python -m src.compare geomA.yaml geomB.yaml` → detection-rate-vs-range curves, range@90%/range@50%, beampattern cuts, and an MCU feasibility column for the first configured target (Teensy 4.1, STM32H7, …)
 - **6 drone trajectory types** — stationary, linear, flyby (CPA), arc, oscillating, waypoint; Doppler-capable via per-sample delay interpolation
 - **Sensor model** — EIN-derived noise floor (ICS-52000, 65 dBA), per-mic gain/phase mismatch, PCB placement error, dead channels, 24-bit quantization (`mic.imperfections`)
 - **ISO 9613-1 atmospheric absorption** — validated against published table anchors; temperature-derived speed of sound shared across all modules
@@ -83,7 +83,7 @@ uv run python -m pytest tests/
 | [docs/snr.md](docs/snr.md) | EIN-based SNR vs manual override, ICS-52000 specs |
 | [docs/srpphat.md](docs/srpphat.md) | Vectorized SRP-PHAT, phase tensor, detection gate |
 | [docs/metrics.md](docs/metrics.md) | Per-frame + aggregate metrics (incl. front/back), CSV column reference |
-| [docs/analysis.md](docs/analysis.md) | Range curves, geometry comparison reports, triangulation, MCU budget |
+| [docs/analysis.md](docs/analysis.md) | Range curves, geometry comparison reports, triangulation, MCU feasibility |
 | [docs/usage.md](docs/usage.md) | CLI reference, sweep runner, dashboard, config inventory |
 | [docs/visualization.md](docs/visualization.md) | Figures, animations, raw data format |
 | [docs/realism.md](docs/realism.md) | Realism assessment, key findings, trust guidance |
