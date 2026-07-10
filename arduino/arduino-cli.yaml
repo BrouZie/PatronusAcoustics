@@ -1,0 +1,8 @@
+board_manager:
+  additional_urls: []
+directories:
+  data: .arduino/packages
+  downloads: .arduino/staging
+  user: .arduino/user
+  libraries: .arduino/libraries
+  built_in_libraries: .arduino/built-in-libraries
