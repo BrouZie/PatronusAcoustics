@@ -1,4 +1,5 @@
 #include <Audio.h>
+#include <cstdint>
 
 AudioInputI2S i2sIn; // ICS-43434 (pins 8, 20, 21)
 AudioAmplifier amp;  // MEMS signal is quiet after 16-bit truncation
@@ -22,15 +23,16 @@ void loop()
 {
     if (peak.available() && rms.available())
     {
-        float p = peak.read();
-        float r = rms.read();
+        float p { peak.read() };
+        float r { rms.read() };
+
         Serial.print("RMS ");
         Serial.print(r, 3);
         Serial.print("  PEAK ");
         Serial.print(p, 3);
         Serial.print("  ");
-        int bars = (int)(p * 60);
-        for (int i = 0; i < bars; i++)
+        int bars = static_cast<int>(p * 100);
+        for (int i { 0 }; i < bars; ++i)
             Serial.print("#");
         Serial.println();
     }
