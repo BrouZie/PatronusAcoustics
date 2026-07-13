@@ -1,42 +1,115 @@
-/// SINGLE ICS-52000 TEST
-/// leave WSO out
 #include <Audio.h>
-#include <cstdint>
 
-AudioInputTDM tdm;  // TDM input (pins 8, 20, 21)
-AudioAmplifier amp;
-AudioAnalyzePeak peak;
-AudioAnalyzeRMS rms;
+// ---------- Config ----------
+// Stock AudioInputTDM = one 256-bit frame = 8 x 32-bit slots => 8 mics max.
+// (1-8 is a single digit, which the launch prompt relies on.)
+constexpr int MAX_MICS = 8;
+constexpr int BAR_W    = 30; // meter width, spans -60..0 dBFS
+// ----------------------------
 
-// One ICS-52000 in slot 0 -> useful 16 bits on EVEN channel 0
-AudioConnection p1(tdm, 0, amp, 0);
-AudioConnection p2(amp, 0, peak, 0);
-AudioConnection p3(amp, 0, rms, 0);
+AudioInputTDM tdm;
+AudioFilterBiquad hp[MAX_MICS];
+AudioAnalyzePeak peak[MAX_MICS];
+AudioAnalyzeRMS rms[MAX_MICS];
+AudioConnection* patch[MAX_MICS * 3];
+
+float hold[MAX_MICS] = { 0 };
+int numMics          = 0;
+
+float toDb(float v)
+{
+    return (v <= 1e-7f) ? -90.0f : 20.0f * log10f(v);
+}
+
+// Blocks forever until you choose.
+int askMicCount()
+{
+    Serial.print("How many ICS-52000 mics? Press 1-");
+    Serial.print(MAX_MICS);
+    Serial.print(": ");
+    for (;;)
+    {
+        while (!Serial.available())
+        { /* wait for a keypress */
+        }
+        char c = Serial.read();
+        if (c >= '1' && c <= char('0' + MAX_MICS))
+        {
+            int n { c - '0' };
+            Serial.print("-> ");
+            Serial.print(n);
+            Serial.println(" mic(s)");
+            return n;
+        }
+        // ignore stray newlines / bad keys and keep waiting
+    }
+}
+
+void printMeter(int i)
+{ // one meter, NO newline (inline layout)
+    float pk = peak[i].read();
+    float r  = rms[i].read();
+    if (pk > hold[i])
+        hold[i] = pk;
+    else
+        hold[i] *= 0.90f;
+
+    float rdb = toDb(r);
+    int bars  = constrain(static_cast<int>((rdb + 60.0f) / 60.0f * BAR_W), 0, BAR_W);
+
+    char label[6];
+    snprintf(label, sizeof(label), "M%d", i + 1);
+    Serial.print(label);
+    Serial.print(' ');
+    Serial.print(rdb, 1);
+    Serial.print(" dB [");
+    for (int b = 0; b < BAR_W; b++)
+        Serial.print(b < bars ? '#' : ' ');
+    Serial.print("] pkhold ");
+    Serial.print(toDb(hold[i]), 1);
+    Serial.print(pk >= 0.999f ? " CLIP!" : "      ");
+}
 
 void setup()
 {
     Serial.begin(115200);
-    AudioMemory(64); // MORE MEMORY WHEN TDM! BUMP EVEN HIGHER FOR ARRAYS!
-    amp.gain(10.0); // start here; raise to 20–40 if levels look tiny
-    Serial.println("ICS-52000 TDM test - make some noise...");
+    while (!Serial)
+    { /* wait for the monitor before doing ANYTHING */
+    }
+
+    numMics = askMicCount();
+    AudioMemory(30 + MAX_MICS * 8); // compile-time constant; sized for worst case
+
+    for (int i { 0 }; i < numMics; i++)
+    {
+        hp[i].setHighpass(0, 40, 0.707f);
+        patch[i * 3 + 0] = new AudioConnection(tdm, i * 2, hp[i], 0);
+        patch[i * 3 + 1] = new AudioConnection(hp[i], 0, peak[i], 0);
+        patch[i * 3 + 2] = new AudioConnection(hp[i], 0, rms[i], 0);
+    }
+
+    delay(300); // let the ICS-52000s finish startup/unmute
+    Serial.print("Running ");
+    Serial.print(numMics);
+    Serial.println(" mic(s). 0 dB = full scale. Tap each mic in turn.");
 }
 
 void loop()
 {
-    if (peak.available() && rms.available())
-    {
-        float p { peak.read() };
-        float r { rms.read() };
+    static uint32_t last { 0 };
+    if (millis() - last < 100)
+        return;
 
-        Serial.print("RMS ");
-        Serial.print(r, 3);
-        Serial.print("  PEAK ");
-        Serial.print(p, 3);
-        Serial.print("  ");
-        int bars = static_cast<int>(p * 100);
-        for (int i { 0 }; i < bars; ++i)
-            Serial.print("#");
-        Serial.println();
+    for (int i { 0 }; i < numMics; i++)
+        if (!peak[i].available() || !rms[i].available())
+            return;
+    last = millis();
+
+    for (int i { 0 }; i < numMics; i++)
+    {
+        printMeter(i);
+        if (i < numMics - 1)
+            Serial.print("  |  ");
     }
-    delay(40);
+    Serial.println();
 }
