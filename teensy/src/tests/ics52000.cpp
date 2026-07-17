@@ -29,6 +29,7 @@ void setup()
     numMics = SerialPrompt::ask_mic_count(Serial, MAX_MICS);
     AudioMemory(30 + MAX_MICS * 8); // compile-time constant; sized for worst case
 
+    // configure the TDM "cords/patches" for the number of mics chosen
     for (int i { 0 }; i < numMics; i++)
     {
         hp[i].setHighpass(0, 40, 0.707f);
@@ -45,15 +46,19 @@ void setup()
 
 void loop()
 {
+    // rate limit the meter output
+    // i.e. only run the void loop if at least 100 ms have passed since last time it ran.
     static uint32_t last { 0 };
     if (millis() - last < 100)
         return;
 
+    // check that all mics have data available before proceeding to read them
     for (int i { 0 }; i < numMics; i++)
         if (!peak[i].available() || !rms[i].available())
             return;
     last = millis();
 
+    // print all mic meters (on one line)
     for (int i { 0 }; i < numMics; i++)
     {
         LevelMeter::print_meter(Serial, i, rms[i].read(), peak[i].read(), hold[i]);
