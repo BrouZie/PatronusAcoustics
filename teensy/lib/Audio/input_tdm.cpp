@@ -1,3 +1,4 @@
+#warning "Building VENDORED input_tdm.cpp (ICS-52000 startup patch applied)"
 /* Audio Library for Teensy 3.X
  * Copyright (c) 2017, Paul Stoffregen, paul@pjrc.com
  *
@@ -26,7 +27,9 @@
 
 #include <Arduino.h>
 #include "input_tdm.h"
+#include "imxrt.h"
 #include "output_tdm.h"
+#if defined(KINETISK) || defined(__IMXRT1062__)
 #include "utility/imxrt_hw.h"
 
 DMAMEM __attribute__((aligned(32)))
@@ -84,7 +87,11 @@ void AudioInputTDM::begin(void)
 	dma.enable();
 
 
+	// I2S1_RCSR (SAI1) is the register controlling RX, TX, and BCLK etc.
+	I2S1_RCSR = I2S_RCSR_BCE; // SCK/BCLK runs, while RX (RE) -> and WS is idle
+	delay(15);				  // > 10 ms
 	I2S1_RCSR = I2S_RCSR_RE | I2S_RCSR_BCE | I2S_RCSR_FRDE | I2S_RCSR_FR;
+
 	dma.attachInterrupt(isr);	
 #endif	
 }
