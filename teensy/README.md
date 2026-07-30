@@ -13,11 +13,12 @@ numbers that feed back into the simulator's MCU model
 
 ```
 src/
-  main.cpp          # development driver: new work is driven here first,
-                    # then promoted to lib/; one day the real station entry point
+  main.cpp          # development driver: currently the live SRP-PHAT pipeline
+                    # (TDM capture → FFT → PHAT → steering → az/el over serial)
   tests/<name>.cpp  # one self-contained experiment per file (frozen once working)
 lib/<Name>/         # app-agnostic building blocks (see rules below)
-include/            # shared project headers (currently unused)
+include/            # shared project headers (ArrayGeometry.hpp: mic XYZ tables)
+docs/               # srpphat.md: design notes + benchmark methodology
 platformio.ini      # env "main" + one [env:test-<name>] per test sketch
 Makefile            # uv + pio wrapper
 ```
@@ -45,13 +46,25 @@ Rules for `lib/<Name>/`:
   heap allocation in the steady state, and keep hot paths inlinable
   (header-visible) when it measurably matters.
 
+Current modules:
+
+| Module | Concern |
+|---|---|
+| `AudioCapture` | Audio-graph sink → overlapping N-channel float frames |
+| `Dsp` | Hann window, f32 RFFT, PHAT normalization (CMSIS-DSP) |
+| `SrpPhat` | Steering tables + power map → az/el + detection gate |
+| `CycleBench` | DWT cycle counter + min/median/max stats |
+| `LevelMeter` | RMS/peak bar-meter rendering |
+| `SerialPrompt` | Blocking serial questions (mic count, menus) |
+
+Array geometries live in `include/ArrayGeometry.hpp` (hand-edited constexpr
+XYZ tables in TDM daisy-chain order); mic count, grid resolution, and
+steering kernel are chosen at launch. See `docs/srpphat.md`.
+
 Planned future modules - create when first needed, never as stubs:
 
 | Module | Concern |
 |---|---|
-| `AudioCapture` | Audio-graph sink → raw multi-channel sample blocks for custom DSP |
-| `Dsp` | FFT / windowing wrappers (CMSIS-DSP) |
-| `SrpPhat` | Phase table + steering → az/el |
 | `Telemetry` | Framing for host plotting / C2 streaming |
 
 ## Workflow
@@ -73,3 +86,7 @@ Current tests:
 - `ics52000` - n-mic ICS-52000 TDM bring-up: interactive mic count, per-mic
   RMS/peak-hold bar meters.
 - `ics43434` - single ICS-43434 on I2S, raw RMS/peak printout.
+- `bench-dsp` - runs with **no mics attached**: memory-bandwidth, RFFT,
+  sqrt/div, and steering-kernel cycle benchmarks (the `mcu.calibrations`
+  numbers for `../py-simulation/docs/mcu.md`) plus synthetic plane-wave
+  DOA validation. See `docs/srpphat.md`.
