@@ -1,5 +1,0 @@
-/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/Core/Src/stm32h7xx_hal_msp.c:62:6:HAL_MspInit	16	static
-/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/Core/Src/stm32h7xx_hal_msp.c:84:6:HAL_UART_MspInit	232	static
-/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/Core/Src/stm32h7xx_hal_msp.c:132:6:HAL_UART_MspDeInit	16	static
-/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/Core/Src/stm32h7xx_hal_msp.c:157:6:HAL_SAI_MspInit	232	static
-/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/Core/Src/stm32h7xx_hal_msp.c:236:6:HAL_SAI_MspDeInit	16	static

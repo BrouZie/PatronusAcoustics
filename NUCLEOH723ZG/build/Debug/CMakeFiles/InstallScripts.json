@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/build/Debug/cmake_install.cmake",
-		"/home/brouzie/Projects/personal/PatronusAcoustics/NUCLEOH723ZG/build/Debug/cmake/stm32cubemx/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
