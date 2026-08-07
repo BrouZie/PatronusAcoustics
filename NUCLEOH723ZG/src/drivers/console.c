@@ -1,9 +1,8 @@
 #include "main.h"
+#include "usart.h"
 #include "console.h"
 
 #include <stdio.h>
-
-extern UART_HandleTypeDef huart3; /* defined in Core/Src/main.c */
 
 void console_init(void)
 {
