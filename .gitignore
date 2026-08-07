@@ -20,3 +20,6 @@ output/
 
 # Simulation results cache (regenerable, keyed by config hash)
 py-simulation/results/cache/
+
+# Block inclusion of reference directory
+stm32/
