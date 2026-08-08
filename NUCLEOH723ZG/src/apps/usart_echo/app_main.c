@@ -11,7 +11,7 @@ void app_main(void)
     for (;;)
     {
         // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-        printf("Tick is currently: %lu\r\n", clock_millis());
+        printf("The tick is currently: %lu\r\n", clock_millis());
 		clock_delay_ms(250);
     }
 }
