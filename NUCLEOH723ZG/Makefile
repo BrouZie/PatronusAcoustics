@@ -7,6 +7,7 @@
 # Usage:
 #   make APP=usart_echo           build one app
 #   make flash APP=usart_echo     build + flash it
+#   make debug APP=usart_echo     build + flash + GDB session
 #   make test                    build and run host tests
 #   make test TEST=ringbuf       run only matching tests
 #   make monitor                 open the serial console
@@ -27,9 +28,19 @@ TOOLCHAIN = cmake/gcc-arm-none-eabi.cmake
 
 JOBFLAG  = $(if $(JOBS),-j $(JOBS),)
 
+GDB        ?= arm-none-eabi-gdb
+OPENOCD    ?= openocd
+OOCD_IFACE ?= interface/stlink.cfg
+OOCD_TGT   ?= target/stm32h7x.cfg
+GDB_PORT   ?= 3333
+GDB_EXTRA  ?=
+ENTRY      ?= app_main
+GDBINIT     = debug/gdbinit
+ELF         = $(BDIR)/$(APP).elf
+
 .DEFAULT_GOAL := build
 .PHONY: build all flash monitor test test-build configure configure-test \
-        compiledb list clean distclean debug help
+        compiledb list clean distclean debug gdbserver attach help
 
 # ---------------------------------------------------------------------------
 # Firmware
@@ -54,16 +65,64 @@ all: $(BDIR)/build.ninja
 flash: $(BDIR)/build.ninja
 	cmake --build $(BDIR) --target flash-$(APP) $(JOBFLAG)
 
+# ---------------------------------------------------------------------------
+# Debugging
+# ---------------------------------------------------------------------------
+
+# Succeeds when something (an OpenOCD, hopefully) is listening on the GDB port.
+port_open = (exec 3<>/dev/tcp/127.0.0.1/$(GDB_PORT)) &>/dev/null
+
+# Release is compiled -Os -g0: no debug info, and inlining scrambles what's
+# left.  Cheap to warn, expensive to discover halfway through a session.
+check_build = if [[ "$(BUILD)" == Release ]]; then \
+	echo "!! BUILD=Release is built -g0 -- no symbols.  Use BUILD=Debug."; fi
+
+# OpenOCD in the foreground, so its log lands where you can read it.
+gdbserver:
+	$(OPENOCD) -f $(OOCD_IFACE) -f $(OOCD_TGT)
+
+# Build, flash and run to $(ENTRY).  Reuses a `make gdbserver` if one is up,
+# otherwise starts its own and takes it down again on exit.
 debug: build
-	@echo "Starting OpenOCD + GDB for $(APP)..."
-	@openocd -f interface/stlink.cfg -f target/stm32h7x.cfg >/dev/null 2>&1 & \
-	OOCD_PID=$$!; \
-	trap "kill $$OOCD_PID 2>/dev/null" EXIT; \
-	sleep 1; \
-	arm-none-eabi-gdb \
-		-ex "target extended-remote :3333" \
+	@$(check_build)
+	@if $(port_open); then \
+		echo "==> Reusing the OpenOCD on :$(GDB_PORT)"; \
+	else \
+		echo "==> Starting OpenOCD (log: $(BDIR)/openocd.log)"; \
+		$(OPENOCD) -f $(OOCD_IFACE) -f $(OOCD_TGT) >$(BDIR)/openocd.log 2>&1 & \
+		trap "kill $$! 2>/dev/null" EXIT; \
+		for _ in {1..50}; do $(port_open) && break; sleep 0.1; done; \
+		if ! $(port_open); then \
+			echo "==> OpenOCD never opened :$(GDB_PORT).  Its log said:"; \
+			cat $(BDIR)/openocd.log; \
+			exit 1; \
+		fi; \
+	fi; \
+	$(GDB) -q $(GDB_EXTRA) -x $(GDBINIT) \
+		-ex "target extended-remote :$(GDB_PORT)" \
 		-ex "monitor reset halt" \
-		$(BDIR)/$(APP).elf
+		-ex "load" \
+		-ex "monitor reset halt" \
+		-ex "tbreak $(ENTRY)" \
+		-ex "continue" \
+		$(ELF)
+
+# Attach to a running `make gdbserver` WITHOUT resetting or re-flashing --
+# this is the one to use on a board that has hung or faulted.
+attach:
+	@$(check_build)
+	@if ! $(port_open); then \
+		echo "Nothing listening on :$(GDB_PORT) -- start 'make gdbserver' first."; \
+		exit 1; \
+	fi
+	@if [[ ! -f $(ELF) ]]; then \
+		echo "$(ELF) does not exist -- 'make build APP=$(APP)' first."; \
+		exit 1; \
+	fi
+	$(GDB) -q $(GDB_EXTRA) -x $(GDBINIT) \
+		-ex "target extended-remote :$(GDB_PORT)" \
+		-ex "monitor halt" \
+		$(ELF)
 
 monitor:
 	picocom -b $(BAUD) $(PORT)
@@ -117,7 +176,9 @@ help:
 	@echo "  build       Build one app            (APP=$(APP))"
 	@echo "  all         Build every app"
 	@echo "  flash       Build + flash via OpenOCD"
-	@echo "  debug       OpenOCD + arm-none-eabi-gdb"
+	@echo "  debug       Build + flash + GDB, stops at app_main"
+	@echo "  gdbserver   OpenOCD in the foreground (own terminal)"
+	@echo "  attach      GDB onto a running gdbserver -- no reset, no flash"
 	@echo "  monitor     picocom on $(PORT) @ $(BAUD)"
 	@echo "  test        Build + run host unit tests (TEST=<regex> to filter)"
 	@echo "  compiledb   Symlink compile_commands.json for clangd"
@@ -125,4 +186,4 @@ help:
 	@echo "  clean       Remove build/$(BUILD) and build/test"
 	@echo "  distclean   Remove all of build/ (needed after toolchain changes)"
 	@echo ""
-	@echo "Variables: APP BUILD PORT BAUD TEST JOBS"
+	@echo "Variables: APP BUILD PORT BAUD TEST JOBS GDB_PORT"
