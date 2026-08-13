@@ -15,12 +15,12 @@
 static uint32_t _dma_buf[ICS_DMA_WORDS] __attribute__((section(ICS_DMA_SECTION), aligned(32)));
 static int32_t _block_buf[ICS_BLOCK_SAMPLES];
 
-/* --------- Stats instance ---------*/
-static ics_stats_t _stats; // surfaced through ics52000_stats(ics_stats_t)
+/* --------- Stats structs ---------*/
+static ics_stats_t _stats; // surfaced through func ics52000_stats(ics_stats_t)
 
 /* --------- Callback/ISR variables ---------*/
-static volatile uint32_t _blocks_produced; // ISR increments
-static uint32_t _blocks_consumed;          // buffer halfs read by CPU
+static volatile uint32_t _chunks_produced; // ISR increments
+static uint32_t _chunks_consumed;          // buffer halfs read by CPU
 
 /* --------- Callback functions ---------*/
 
@@ -29,7 +29,7 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef* hsai)
 {
     if (hsai->Instance != SAI1_Block_A)
         return;
-    ++_blocks_produced;
+    ++_chunks_produced;
 }
 
 void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef* hsai)
@@ -38,7 +38,7 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef* hsai)
         return;
 
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
-    ++_blocks_produced;
+    ++_chunks_produced;
 }
 
 void HAL_SAI_ErrorCallback(SAI_HandleTypeDef* hsai)
@@ -67,8 +67,8 @@ void ics52000_start(void)
     if (HAL_SAI_Init(&ICS_SAI_HANDLE_1) != HAL_OK)
         Error_Handler();
 
-    _blocks_produced = 0;
-    _blocks_consumed = 0;
+    _chunks_produced = 0;
+    _chunks_consumed = 0;
 
     if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)_dma_buf, ICS_DMA_WORDS) != HAL_OK)
         Error_Handler();
@@ -77,32 +77,48 @@ void ics52000_start(void)
 void ics52000_stop(void)
 {
     HAL_SAI_DMAStop(&ICS_SAI_HANDLE_1);
-    _blocks_produced = 0;
-    _blocks_consumed = 0;
+    _chunks_produced = 0;
+    _chunks_consumed = 0;
 }
 
-bool ics52000_read(ics_chunk_t* chunk)
+bool ics52000_read(const ics_sample_t** data)
 {
-    uint32_t p = _blocks_produced;
-    if (_blocks_consumed == p)
+    uint32_t p0 = _chunks_produced;
+    if (_chunks_consumed == p0)
         return false;
 
-    if (p - _blocks_consumed > 1)
-        _stats.dropped += p - _blocks_consumed - 1;
+    if (p0 - _chunks_consumed > 1)
+        _stats.dropped += p0 - _chunks_consumed - 1;
 
-    uint32_t* src = &_dma_buf[((p - 1) % 2) * (ICS_DMA_WORDS / 2)];
+    uint32_t* src = &_dma_buf[((p0 - 1) % 2) * (ICS_DMA_WORDS / 2)];
     for (int i = 0; i < ICS_BLOCK_SAMPLES; ++i)
-    {
         _block_buf[i] = _sample(src[i]);
+
+    __DMB(); // ensures the prior for-loop fully executes first
+    uint32_t p1 = _chunks_produced;
+
+    _chunks_consumed = p1;
+
+    if (p1 - p0 >= 2) // ping-pong: chunk N and N+2 share memory
+    {
+        ++_stats.lapped;
+        return false;
     }
 
-    chunk->data   = _block_buf;
-    chunk->frames = ICS_SAMPLES_PER_MIC;
-
-    _blocks_consumed = p;
-    _stats.blocks++;
+    _stats.chunks++;
+    *data = _block_buf;
 
     return true;
+}
+
+ics_config_t ics52000_config(void)
+{
+    ics_config_t conf;
+    conf.ics_samples_per_mic = ICS_SAMPLES_PER_MIC;
+    conf.ics_mic_count       = ICS_MIC_COUNT;
+    // _config.sample_rate         = ICS_SAMPLE_RATE;
+
+    return conf;
 }
 
 ics_stats_t ics52000_stats(void)
