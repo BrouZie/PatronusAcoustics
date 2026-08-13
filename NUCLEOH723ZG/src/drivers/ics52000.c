@@ -56,8 +56,43 @@ static inline int32_t _sample(uint32_t raw)
     return (raw & 0x00800000u) ? raw | 0xFF000000u : raw; // positive or negative
 }
 
+static inline uint8_t _mpu_size(uint32_t bytes)
+{
+    uint32_t size = 32;
+
+    while (size < bytes)
+    {
+        size <<= 1;
+    }
+
+    return (uint8_t)(__builtin_ctz(size) - 1);
+}
+
+void _MPU_resize(void)
+{
+  HAL_MPU_Disable();
+  MPU_Region_InitTypeDef MPU_InitStruct = {0};
+
+  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
+  MPU_InitStruct.BaseAddress = 0x24000000;
+  MPU_InitStruct.Size = _mpu_size(ICS_DMA_WORDS * sizeof(uint32_t));
+  MPU_InitStruct.SubRegionDisable = 0x0;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
+  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
+  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+  MPU_InitStruct.IsBufferable = MPU_ACCESS_BUFFERABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+  HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
+}
+
 void ics52000_start(void)
 {
+	_MPU_resize();
+
     HAL_SAI_DeInit(&ICS_SAI_HANDLE_1);
 
     ICS_SAI_HANDLE_1.FrameInit.FrameLength = ICS_SLOT_COUNT * 32;
