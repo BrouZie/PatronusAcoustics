@@ -1,0 +1,7 @@
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:63:6:HAL_MspInit	16	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:85:6:HAL_TIM_Base_MspInit	24	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:111:6:HAL_TIM_Base_MspDeInit	16	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:136:6:HAL_UART_MspInit	232	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:203:6:HAL_UART_MspDeInit	16	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:232:6:HAL_SAI_MspInit	232	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/stm32h7xx_hal_msp.c:298:6:HAL_SAI_MspDeInit	16	static

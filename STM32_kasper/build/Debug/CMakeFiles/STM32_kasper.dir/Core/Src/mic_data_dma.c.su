@@ -1,0 +1,2 @@
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/mic_data_dma.c:3:6:DMA_Transfer_Complete	16	static
+/home/kasperngbergan/workstation/eik/PatronusAcoustics/STM32_kasper/Core/Src/mic_data_dma.c:12:6:UART_DMA_Send_Buffer	16	static
