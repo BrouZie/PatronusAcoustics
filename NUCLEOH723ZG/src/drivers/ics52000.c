@@ -1,19 +1,29 @@
 #include "ics52000.h"
+
+#include "audio_config.h"
 #include "main.h"
 #include "sai.h"
 
-/* --------- CONFIG ---------*/
-#define ICS_MIC_COUNT 1
-#define ICS_SLOT_COUNT (ICS_MIC_COUNT <= 2 ? 2 : ICS_MIC_COUNT <= 4 ? 4 : 8)
+/* --------- HARDWARE BINDINGS ---------*/
 #define ICS_SAI_HANDLE_1 hsai_BlockA1
 #define ICS_DMA_SECTION ".RAM_D1"
-#define ICS_SAMPLES_PER_MIC 512 // controls latency & buffer size
-#define ICS_BLOCK_SAMPLES (ICS_SAMPLES_PER_MIC * ICS_MIC_COUNT)
-#define ICS_DMA_WORDS (ICS_BLOCK_SAMPLES * 2)
+
+// TDM frames are padded to the next supported slot count.
+#define ICS_SLOT_COUNT (AUDIO_MIC_COUNT <= 2 ? 2 : AUDIO_MIC_COUNT <= 4 ? 4 : 8)
+
+// Ping-pong: the DMA buffer holds two blocks, halves signalled separately.
+#define ICS_DMA_WORDS (AUDIO_BLOCK_SAMPLES * 2)
+
+// The only place a HAL constant is tied to the configured sample depth.
+#if AUDIO_SAMPLE_BITS == 24
+#define ICS_SAI_DATASIZE SAI_DATASIZE_24
+#else
+#error "No SAI_DATASIZE_* mapping for this AUDIO_SAMPLE_BITS"
+#endif
 
 /* --------- AUDIO BUFFERS ---------*/
 static uint32_t _dma_buf[ICS_DMA_WORDS] __attribute__((section(ICS_DMA_SECTION), aligned(32)));
-static int32_t _block_buf[ICS_BLOCK_SAMPLES];
+static audio_sample_t _block_buf[AUDIO_BLOCK_SAMPLES];
 
 /* --------- Stats structs ---------*/
 static ics_stats_t _stats; // surfaced through func ics52000_stats(ics_stats_t)
@@ -49,11 +59,12 @@ void HAL_SAI_ErrorCallback(SAI_HandleTypeDef* hsai)
     _stats.last_hal_err = hsai->ErrorCode;
 }
 
-/* Convert raw uint32_t value to a signed int32_t
- * utilizing two's complement*/
-static inline int32_t _sample(uint32_t raw)
+// Convert raw uint32_t value to a signed
+// int32_t utilizing two's complement.
+static inline audio_sample_t _sample(uint32_t raw)
 {
-    return (raw & 0x00800000u) ? raw | 0xFF000000u : raw; // positive or negative
+    const uint32_t sign_bit = (uint32_t)AUDIO_FULL_SCALE;
+    return (raw & sign_bit) ? (audio_sample_t)(raw | ~(sign_bit - 1u)) : (audio_sample_t)raw;
 }
 
 static inline uint8_t _mpu_size(uint32_t bytes)
@@ -70,34 +81,65 @@ static inline uint8_t _mpu_size(uint32_t bytes)
 
 void _MPU_resize(void)
 {
-  HAL_MPU_Disable();
-  MPU_Region_InitTypeDef MPU_InitStruct = {0};
+    HAL_MPU_Disable();
+    MPU_Region_InitTypeDef MPU_InitStruct = { 0 };
 
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
-  MPU_InitStruct.BaseAddress = 0x24000000;
-  MPU_InitStruct.Size = _mpu_size(ICS_DMA_WORDS * sizeof(uint32_t));
-  MPU_InitStruct.SubRegionDisable = 0x0;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_BUFFERABLE;
+    MPU_InitStruct.Enable           = MPU_REGION_ENABLE;
+    MPU_InitStruct.Number           = MPU_REGION_NUMBER0;
+    MPU_InitStruct.BaseAddress      = 0x24000000;
+    MPU_InitStruct.Size             = _mpu_size(ICS_DMA_WORDS * sizeof(uint32_t));
+    MPU_InitStruct.SubRegionDisable = 0x0;
+    MPU_InitStruct.TypeExtField     = MPU_TEX_LEVEL0;
+    MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
+    MPU_InitStruct.DisableExec      = MPU_INSTRUCTION_ACCESS_ENABLE;
+    MPU_InitStruct.IsShareable      = MPU_ACCESS_SHAREABLE;
+    MPU_InitStruct.IsCacheable      = MPU_ACCESS_NOT_CACHEABLE;
+    MPU_InitStruct.IsBufferable     = MPU_ACCESS_BUFFERABLE;
 
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-  HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
+    HAL_MPU_ConfigRegion(&MPU_InitStruct);
+    HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
+}
+
+// Not confident this works at all
+static void _ics_dma_start(void)
+{
+    GPIO_InitTypeDef g = { 0 };
+
+    // PE4 as GPIO low: SCK runs, WS held quiet
+    g.Pin   = GPIO_PIN_4;
+    g.Mode  = GPIO_MODE_OUTPUT_PP;
+    g.Pull  = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    HAL_GPIO_Init(GPIOE, &g);
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, GPIO_PIN_RESET);
+
+    if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)_dma_buf, ICS_DMA_WORDS) != HAL_OK)
+        Error_Handler();
+
+    HAL_Delay(20);
+
+    // Now hand PE4 to the SAI
+    g.Mode      = GPIO_MODE_AF_PP;
+    g.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOE, &g);
+
+    HAL_Delay(200); // datasheet: valid data after 262144 SCK (~85 ms @ 48k)
 }
 
 void ics52000_start(void)
 {
-	_MPU_resize();
+    _MPU_resize();
 
     HAL_SAI_DeInit(&ICS_SAI_HANDLE_1);
 
+    /* Whatever the .ioc last generated into Core/Src/sai.c is
+     * overwritten here, so audio_config.h stays the single
+     * source of truth across a CubeMX regeneration. */
+    ICS_SAI_HANDLE_1.Init.AudioFrequency   = AUDIO_SAMPLE_RATE_HZ;
+    ICS_SAI_HANDLE_1.Init.DataSize         = ICS_SAI_DATASIZE;
     ICS_SAI_HANDLE_1.FrameInit.FrameLength = ICS_SLOT_COUNT * 32;
     ICS_SAI_HANDLE_1.SlotInit.SlotNumber   = ICS_SLOT_COUNT;
-    ICS_SAI_HANDLE_1.SlotInit.SlotActive   = (1u << ICS_MIC_COUNT) - 1u;
+    ICS_SAI_HANDLE_1.SlotInit.SlotActive   = (1u << AUDIO_MIC_COUNT) - 1u;
 
     if (HAL_SAI_Init(&ICS_SAI_HANDLE_1) != HAL_OK)
         Error_Handler();
@@ -105,8 +147,7 @@ void ics52000_start(void)
     _chunks_produced = 0;
     _chunks_consumed = 0;
 
-    if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)_dma_buf, ICS_DMA_WORDS) != HAL_OK)
-        Error_Handler();
+    _ics_dma_start();
 }
 
 void ics52000_stop(void)
@@ -116,7 +157,7 @@ void ics52000_stop(void)
     _chunks_consumed = 0;
 }
 
-bool ics52000_read(const ics_sample_t** data)
+bool ics52000_read(const audio_sample_t** data)
 {
     uint32_t p0 = _chunks_produced;
     if (_chunks_consumed == p0)
@@ -126,7 +167,7 @@ bool ics52000_read(const ics_sample_t** data)
         _stats.dropped += p0 - _chunks_consumed - 1;
 
     uint32_t* src = &_dma_buf[((p0 - 1) % 2) * (ICS_DMA_WORDS / 2)];
-    for (int i = 0; i < ICS_BLOCK_SAMPLES; ++i)
+    for (int i = 0; i < AUDIO_BLOCK_SAMPLES; ++i)
         _block_buf[i] = _sample(src[i]);
 
     __DMB(); // ensures the prior for-loop fully executes first
@@ -146,17 +187,18 @@ bool ics52000_read(const ics_sample_t** data)
     return true;
 }
 
-ics_config_t ics52000_config(void)
+audio_format_t ics52000_format(void)
 {
-    ics_config_t conf;
-    conf.ics_samples_per_mic = ICS_SAMPLES_PER_MIC;
-    conf.ics_mic_count       = ICS_MIC_COUNT;
-    // _config.sample_rate         = ICS_SAMPLE_RATE;
-
-    return conf;
+    return (audio_format_t) {
+        .samples_per_block = AUDIO_SAMPLES_PER_BLOCK,
+        .mic_count         = AUDIO_MIC_COUNT,
+        .sample_rate_hz    = AUDIO_SAMPLE_RATE_HZ,
+        .sample_bits       = AUDIO_SAMPLE_BITS,
+        .full_scale        = AUDIO_FULL_SCALE,
+    };
 }
 
-ics_stats_t ics52000_stats(void)
+ics_stats_t* ics52000_stats(void)
 {
-    return _stats;
+    return &_stats;
 }

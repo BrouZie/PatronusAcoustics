@@ -33,6 +33,27 @@ set(OPENOCD_INTERFACE "interface/stlink.cfg"  CACHE STRING "OpenOCD interface cf
 set(OPENOCD_TARGET    "target/stm32h7x.cfg"   CACHE STRING "OpenOCD target cfg")
 
 # ----------------------------------------------------------------------------
+# Build-tree configuration.
+#
+# To override #ifndef-guarded defaults in src/config/audio_config.h pass
+# -DPATRONUS_<ifndef macro>=4. E.g:
+#
+#	make build -DPATRONUS_MIC_COUNT=8
+# ----------------------------------------------------------------------------
+set(PATRONUS_MIC_COUNT  "" CACHE STRING "Microphones in the array (1..8); blank = audio_config.h default")
+set(PATRONUS_BLOCK_SIZE "" CACHE STRING "Samples per mic per block;      blank = audio_config.h default")
+
+# Blank by default, and ONLY defined when explicitly set. The header is
+# The source of truth, while provides a possibility of passing overrides
+# during compilation.
+if(PATRONUS_MIC_COUNT)
+    add_compile_definitions(AUDIO_MIC_COUNT=${PATRONUS_MIC_COUNT})
+endif()
+if(PATRONUS_BLOCK_SIZE)
+    add_compile_definitions(AUDIO_SAMPLES_PER_BLOCK=${PATRONUS_BLOCK_SIZE})
+endif()
+
+# ----------------------------------------------------------------------------
 # CubeMX generated layer
 #
 # This CubeMX template attaches HAL sources, include dirs and startup code
@@ -120,14 +141,23 @@ endfunction()
 #                name        directory                          HAL access?
 add_module(dsp        ${CMAKE_SOURCE_DIR}/src/dsp)            # portable, host-testable
 add_module(drivers    ${CMAKE_SOURCE_DIR}/src/drivers   HAL)
-add_module(config     ${CMAKE_SOURCE_DIR}/src/config    HAL)
+add_module(config     ${CMAKE_SOURCE_DIR}/src/config)         # leaf: no HAL, ever
 add_module(time_sync  ${CMAKE_SOURCE_DIR}/src/time      HAL)
 add_module(transport  ${CMAKE_SOURCE_DIR}/src/transport HAL)
+
+# Which modules may see the compile-time config.  PRIVATE, because a module
+# reads config to size its own static buffers - it does not re-export those
+# numbers.  Downstream consumers get them at runtime instead, via the
+# published contracts in src/types/ (e.g. ics52000_format()).
+#
+# dsp is absent by design: it takes audio_format_t as a parameter, which is
+# what keeps it compilable in the host test build (test/CMakeLists.txt).
+target_link_libraries(drivers PRIVATE config)
 
 set(APP_LIBS ${CMAKE_PROJECT_NAME} drivers dsp config time_sync transport)
 
 # ----------------------------------------------------------------------------
-# Applications: one subdirectory of src/apps/ == one flashable binary.
+# Applications: one subdirectory of src/apps/ - one flashable binary.
 #
 # Each app supplies main_app(); CubeMX's Core/Src/main.c provides main() and
 # calls it, and arrives via the stm32cubemx interface library.
