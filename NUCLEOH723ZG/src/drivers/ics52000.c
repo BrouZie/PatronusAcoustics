@@ -3,6 +3,7 @@
 #include "audio_config.h"
 #include "main.h"
 #include "sai.h"
+#include <tim.h>
 
 /* --------- HARDWARE BINDINGS ---------*/
 #define ICS_SAI_HANDLE_1 hsai_BlockA1
@@ -100,8 +101,7 @@ void _MPU_resize(void)
     HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
 }
 
-// Not confident this works at all
-static void _ics_dma_start(void)
+void _disable_fs_SAI(void)
 {
     GPIO_InitTypeDef g = { 0 };
 
@@ -111,19 +111,44 @@ static void _ics_dma_start(void)
     g.Pull  = GPIO_NOPULL;
     g.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     HAL_GPIO_Init(GPIOE, &g);
-    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, GPIO_PIN_RESET);
+}
+
+void _enable_fs_SAI(void)
+{
+    GPIO_InitTypeDef g = { 0 };
+
+    // Now hand PE4 to the SAI
+    g.Pin       = GPIO_PIN_4;
+    g.Mode      = GPIO_MODE_AF_PP;
+    g.Pull      = GPIO_NOPULL;
+    g.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    g.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOE, &g);
+}
+
+// Timer callback
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
+{
+    if (htim->Instance == TIM7)
+    {
+        _enable_fs_SAI();
+        HAL_TIM_Base_Stop_IT(&htim7);
+        __HAL_TIM_SET_AUTORELOAD(&htim7, 99);
+        __HAL_TIM_SET_COUNTER(&htim7, 0);
+        HAL_TIM_Base_Start_IT(&htim7);
+    }
+}
+
+// Not confident this works at all
+static void _ics_dma_start(void)
+{
+    _disable_fs_SAI();
+    __HAL_SAI_ENABLE(&ICS_SAI_HANDLE_1);
+
+    HAL_TIM_Base_Start_IT(&htim7);
 
     if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)_dma_buf, ICS_DMA_WORDS) != HAL_OK)
         Error_Handler();
-
-    HAL_Delay(20);
-
-    // Now hand PE4 to the SAI
-    g.Mode      = GPIO_MODE_AF_PP;
-    g.Alternate = GPIO_AF6_SAI1;
-    HAL_GPIO_Init(GPIOE, &g);
-
-    HAL_Delay(200); // datasheet: valid data after 262144 SCK (~85 ms @ 48k)
 }
 
 void ics52000_start(void)
