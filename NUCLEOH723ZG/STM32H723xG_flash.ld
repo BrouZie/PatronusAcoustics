@@ -226,13 +226,19 @@ SECTIONS
       PROVIDE( __bss_end = .);
   } >DTCMRAM
 
-  .ram_d1 (NOLOAD) :
+  /* Raw audio buffer in RAM_D1 */
+  .raw_buf (NOLOAD) :
   {
 	  . = ALIGN(32);
-	  *(.RAM_D1)
-	  *(.RAM_D1*)
+	  *(.raw_buf)
 	  . = ALIGN(32);
   } >RAM_D1
+
+  /* Raw audio buffer in DTCM */
+  .dtcm_buf (NOLOAD) :
+  {
+	  *(.dtcm_buf)
+  } >DTCMRAM
 
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 

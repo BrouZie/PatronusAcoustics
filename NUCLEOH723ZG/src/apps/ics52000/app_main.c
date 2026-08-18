@@ -30,7 +30,7 @@ void app_main(void)
                         peak = a;
                 }
                 float rms  = sqrtf((float)sum_sq / (fmt.samples_per_block));
-				float dbfs = 20.0f * log10f((rms < 1.0f ? 1.0f : rms) / (float)fmt.full_scale);
+				float dbfs = 20.0f * log10f(rms / 2147483648.0f + 1e-20f);
                 // printf("%8ld %8ld %6d\t", (long)rms, (long)peak, (int)dbfs);
 				printf("%ld", (long)dbfs);
 				if (i + 1 < fmt.mic_count) printf(",");

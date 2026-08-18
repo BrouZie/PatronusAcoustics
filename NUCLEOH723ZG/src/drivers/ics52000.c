@@ -5,9 +5,10 @@
 #include "sai.h"
 #include <tim.h>
 
-/* --------- HARDWARE BINDINGS ---------*/
+/* --------- HARDWARE & LINKER BINDINGS ---------*/
 #define ICS_SAI_HANDLE_1 hsai_BlockA1
-#define ICS_DMA_SECTION ".RAM_D1"
+#define ICS_RAM_BUF ".raw_buf"
+#define ICS_DTCM_BUF ".dtcm_buf"
 
 // TDM frames are padded to the next supported slot count.
 #define ICS_SLOT_COUNT (AUDIO_MIC_COUNT <= 2 ? 2 : AUDIO_MIC_COUNT <= 4 ? 4 : 8)
@@ -16,15 +17,15 @@
 #define ICS_DMA_WORDS (AUDIO_BLOCK_SAMPLES * 2)
 
 // The only place a HAL constant is tied to the configured sample depth.
-#if AUDIO_SAMPLE_BITS == 24
-#define ICS_SAI_DATASIZE SAI_DATASIZE_24
+#if AUDIO_SAMPLE_BITS == 32
+#define ICS_SAI_DATASIZE SAI_DATASIZE_32
 #else
 #error "No SAI_DATASIZE_* mapping for this AUDIO_SAMPLE_BITS"
 #endif
 
 /* --------- AUDIO BUFFERS ---------*/
-static uint32_t _dma_buf[ICS_DMA_WORDS] __attribute__((section(ICS_DMA_SECTION), aligned(32)));
-static audio_sample_t _block_buf[AUDIO_BLOCK_SAMPLES];
+static uint32_t _dma_buf[ICS_DMA_WORDS] __attribute__((section(ICS_RAM_BUF), aligned(32)));
+static audio_sample_t _block_buf[AUDIO_BLOCK_SAMPLES] __attribute((section(ICS_DTCM_BUF)));
 
 /* --------- Stats structs ---------*/
 static ics_stats_t _stats; // surfaced through func ics52000_stats(ics_stats_t)
@@ -60,13 +61,6 @@ void HAL_SAI_ErrorCallback(SAI_HandleTypeDef* hsai)
     _stats.last_hal_err = hsai->ErrorCode;
 }
 
-// Convert raw uint32_t value to a signed
-// int32_t utilizing two's complement.
-static inline audio_sample_t _sample(uint32_t raw)
-{
-    const uint32_t sign_bit = (uint32_t)AUDIO_FULL_SCALE;
-    return (raw & sign_bit) ? (audio_sample_t)(raw | ~(sign_bit - 1u)) : (audio_sample_t)raw;
-}
 
 static inline uint8_t _mpu_size(uint32_t bytes)
 {
@@ -193,9 +187,10 @@ bool ics52000_read(const audio_sample_t** data)
 
     uint32_t* src = &_dma_buf[((p0 - 1) % 2) * (ICS_DMA_WORDS / 2)];
     for (int i = 0; i < AUDIO_BLOCK_SAMPLES; ++i)
-        _block_buf[i] = _sample(src[i]);
+        _block_buf[i] = (int32_t)src[i];
 
-    __DMB(); // ensures the prior for-loop fully executes first
+	// _block_buf = (int32_t)src;
+
     uint32_t p1 = _chunks_produced;
 
     _chunks_consumed = p1;

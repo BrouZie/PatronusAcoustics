@@ -29,7 +29,7 @@
 #endif
 
 #ifndef AUDIO_SAMPLE_BITS
-#define AUDIO_SAMPLE_BITS 24
+#define AUDIO_SAMPLE_BITS 32
 #endif
 
 // Controls latency and buffer size: one block is
@@ -58,7 +58,7 @@ _Static_assert((AUDIO_SAMPLES_PER_BLOCK & (AUDIO_SAMPLES_PER_BLOCK - 1)) == 0,
 // AUDIO_FULL_SCALE and audio_format_t.full_scale are signed 32-bit, so 24 is
 // the largest depth that cannot overflow. Widen both to int64_t/float before
 // raising this.
-_Static_assert(AUDIO_SAMPLE_BITS >= 8 && AUDIO_SAMPLE_BITS <= 24,
-               "AUDIO_FULL_SCALE would overflow int32_t above 24 bits");
+_Static_assert(AUDIO_SAMPLE_BITS >= 8 && AUDIO_SAMPLE_BITS <= 32,
+               "AUDIO_FULL_SCALE would overflow int32_t above 32 bits");
 
 #endif
