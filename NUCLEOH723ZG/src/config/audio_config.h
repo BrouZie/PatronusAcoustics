@@ -38,7 +38,13 @@
 #define AUDIO_SAMPLES_PER_BLOCK 512
 #endif
 
+// Fast Fourier Tranform buffer
+#ifndef FFT_BUFFER_SIZE
+#define FFT_BUFFER_SIZE AUDIO_SAMPLES_PER_BLOCK
+#endif
+
 //--------- Derived. Don't edit by hand! ---------
+
 
 // Largest positive sample magnitude, i.e. 0 dBFS. Replaces the 8388608.0f
 // that used to be hardcoded in src/dsp/.

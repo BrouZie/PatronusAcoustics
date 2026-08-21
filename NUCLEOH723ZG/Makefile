@@ -38,6 +38,8 @@ ENTRY      ?= app_main
 GDBINIT     = debug/gdbinit
 ELF         = $(BDIR)/$(APP).elf
 
+SHELL := /bin/bash
+
 .DEFAULT_GOAL := build
 .PHONY: build all flash monitor test test-build configure configure-test \
         compiledb list clean distclean debug gdbserver attach help

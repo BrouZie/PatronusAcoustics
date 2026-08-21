@@ -225,7 +225,10 @@ foreach(APP ${APP_CANDIDATES})
 
     # The toolchain file hardcodes -Wl,-Map=<project>.map, which would collide
     # across apps.  ld honours the last -Map on the command line.
-    target_link_options(${APP} PRIVATE -Wl,-Map=${APP}.map)
+		target_link_options(${APP} PRIVATE
+				-Wl,-Map=${APP}.map
+				-u _printf_float
+		)
 
     add_custom_command(TARGET ${APP} POST_BUILD
         COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${APP}>
