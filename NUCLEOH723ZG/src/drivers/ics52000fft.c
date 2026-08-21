@@ -6,9 +6,6 @@
 #include "sai.h"
 #include <tim.h>
 
-#include "console.h"
-#include <stdio.h>
-
 /* --------- HARDWARE & LINKER BINDINGS ---------*/
 #define ICS_SAI_HANDLE_1 hsai_BlockA1
 #define ICS_RAM_BUF ".raw_buf"

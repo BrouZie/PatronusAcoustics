@@ -239,11 +239,13 @@ SECTIONS
   {
 	  *(.dtcm_raw_buf)
   } >DTCMRAM
+
   /* Windowed audio buffer in DTCM */
   .dtcm_windowed_buf (NOLOAD) :
   {
 	  *(.dtcm_windowed_buf)
   } >DTCMRAM
+
   /* FFT buffer in DTCM */
   .dtcm_fft_buf (NOLOAD) :
   {

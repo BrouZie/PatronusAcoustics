@@ -183,7 +183,6 @@ target_include_directories(cmsis_dsp PUBLIC
 
 target_compile_definitions(cmsis_dsp PUBLIC
     ARM_MATH_CM7
-    __FPU_PRESENT=1
 )
 
 target_compile_options(cmsis_dsp PRIVATE -Ofast)
