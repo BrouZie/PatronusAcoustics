@@ -235,9 +235,21 @@ SECTIONS
   } >RAM_D1
 
   /* Raw audio buffer in DTCM */
-  .dtcm_buf (NOLOAD) :
+  .dtcm_raw_buf (NOLOAD) :
   {
-	  *(.dtcm_buf)
+	  *(.dtcm_raw_buf)
+  } >DTCMRAM
+
+  /* Windowed audio buffer in DTCM */
+  .dtcm_windowed_buf (NOLOAD) :
+  {
+	  *(.dtcm_windowed_buf)
+  } >DTCMRAM
+
+  /* FFT buffer in DTCM */
+  .dtcm_fft_buf (NOLOAD) :
+  {
+	  *(.dtcm_fft_buf)
   } >DTCMRAM
 
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );

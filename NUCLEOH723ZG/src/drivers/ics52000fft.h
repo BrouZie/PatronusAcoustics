@@ -16,9 +16,9 @@ typedef struct
     uint32_t last_hal_err;
 } ics_stats_t;
 
-void ics52000_start(void);
-bool ics52000_read(const audio_sample_t** data);
-void ics52000_stop(void);
+void ics52000_start_fft(void);
+bool ics52000_read_fft(const audio_sample_t** data);
+void ics52000_stop_fft(void);
 
 audio_format_t ics52000_format(void);
 ics_stats_t* ics52000_stats(void);
