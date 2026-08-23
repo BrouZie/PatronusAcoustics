@@ -9,11 +9,12 @@
 
 typedef struct
 {
-    uint32_t chunks;
-    uint32_t dropped;
-    uint32_t lapped;
+    uint32_t blocks_delivered;
+    uint32_t mdma_busy;
+    uint32_t overwritten;
     uint32_t bus_errors;
     uint32_t last_hal_err;
+	uint32_t mdma_errors;
 } ics_stats_t;
 
 void ics52000_start(void);
