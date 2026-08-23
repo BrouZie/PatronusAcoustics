@@ -163,7 +163,7 @@ set(APP_LIBS ${CMAKE_PROJECT_NAME} drivers dsp config time_sync transport)
 # calls it, and arrives via the stm32cubemx interface library.
 # ----------------------------------------------------------------------------
 set(APPS "")
-file(GLOB APP_CANDIDATES RELATIVE ${CMAKE_SOURCE_DIR}/src/apps
+file(GLOB APP_CANDIDATES CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/apps
      ${CMAKE_SOURCE_DIR}/src/apps/*)
 
 foreach(APP ${APP_CANDIDATES})

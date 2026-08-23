@@ -40,7 +40,7 @@
 
 //--------- Derived. Don't edit by hand! ---------
 
-// Largest positive sample magnitude, i.e. 0 dBFS. Replaces the 8388608.0f
+// Largest positive sample magnitude, i.e. 0 dBFS. Replaces the 2147483648.0f
 // that used to be hardcoded in src/dsp/.
 #define AUDIO_FULL_SCALE (1L << (AUDIO_SAMPLE_BITS - 1))
 
