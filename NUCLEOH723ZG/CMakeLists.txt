@@ -53,6 +53,7 @@ if(PATRONUS_BLOCK_SIZE)
     add_compile_definitions(AUDIO_SAMPLES_PER_BLOCK=${PATRONUS_BLOCK_SIZE})
 endif()
 
+
 # ----------------------------------------------------------------------------
 # CubeMX generated layer
 #
@@ -154,7 +155,44 @@ add_module(transport  ${CMAKE_SOURCE_DIR}/src/transport HAL)
 # what keeps it compilable in the host test build (test/CMakeLists.txt).
 target_link_libraries(drivers PRIVATE config)
 
-set(APP_LIBS ${CMAKE_PROJECT_NAME} drivers dsp config time_sync transport)
+# ----------------------------------------------------------------------------
+# CMSIS configuration
+# 
+# Needed to get arm librariesNeeded to get arm libraries 
+# ----------------------------------------------------------------------------
+
+set(CMSIS_DSP_DIR  ${CMAKE_SOURCE_DIR}/CMSIS-DSP)
+set(CMSIS_CORE_DIR ${CMAKE_SOURCE_DIR}/Drivers/CMSIS)
+
+set(CMSIS_DSP_SOURCES
+    ${CMSIS_DSP_DIR}/Source/BasicMathFunctions/BasicMathFunctions.c
+    ${CMSIS_DSP_DIR}/Source/CommonTables/CommonTables.c
+    ${CMSIS_DSP_DIR}/Source/TransformFunctions/TransformFunctions.c
+    ${CMSIS_DSP_DIR}/Source/ComplexMathFunctions/ComplexMathFunctions.c
+    ${CMSIS_DSP_DIR}/Source/FastMathFunctions/FastMathFunctions.c
+    ${CMSIS_DSP_DIR}/Source/StatisticsFunctions/StatisticsFunctions.c
+)
+
+add_library(cmsis_dsp STATIC ${CMSIS_DSP_SOURCES})
+
+target_include_directories(cmsis_dsp PUBLIC
+    ${CMSIS_DSP_DIR}/Include
+    ${CMSIS_DSP_DIR}/PrivateInclude
+    ${CMSIS_CORE_DIR}/Include
+)
+
+target_compile_definitions(cmsis_dsp PUBLIC
+    ARM_MATH_CM7
+)
+
+target_compile_options(cmsis_dsp PRIVATE -Ofast)
+
+target_link_libraries(drivers PRIVATE config)
+target_link_libraries(drivers PRIVATE cmsis_dsp)
+
+# ---- end CMSIS-DSP ----
+
+set(APP_LIBS ${CMAKE_PROJECT_NAME} drivers dsp config time_sync transport cmsis_dsp)
 
 # ----------------------------------------------------------------------------
 # Applications: one subdirectory of src/apps/ - one flashable binary.
@@ -163,8 +201,9 @@ set(APP_LIBS ${CMAKE_PROJECT_NAME} drivers dsp config time_sync transport)
 # calls it, and arrives via the stm32cubemx interface library.
 # ----------------------------------------------------------------------------
 set(APPS "")
-file(GLOB APP_CANDIDATES CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/apps
+file(GLOB APP_CANDIDATES RELATIVE ${CMAKE_SOURCE_DIR}/src/apps
      ${CMAKE_SOURCE_DIR}/src/apps/*)
+
 
 foreach(APP ${APP_CANDIDATES})
     set(APP_DIR ${CMAKE_SOURCE_DIR}/src/apps/${APP})
@@ -185,7 +224,10 @@ foreach(APP ${APP_CANDIDATES})
 
     # The toolchain file hardcodes -Wl,-Map=<project>.map, which would collide
     # across apps.  ld honours the last -Map on the command line.
-    target_link_options(${APP} PRIVATE -Wl,-Map=${APP}.map)
+		target_link_options(${APP} PRIVATE
+				-Wl,-Map=${APP}.map
+				-u _printf_float
+		)
 
     add_custom_command(TARGET ${APP} POST_BUILD
         COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${APP}>

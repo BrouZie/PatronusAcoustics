@@ -1,6 +1,7 @@
 #include "ics52000.h"
 
 #include "audio_config.h"
+#include "audio_format.h"
 #include "main.h"
 #include "mdma.h"
 #include "sai.h"
@@ -30,7 +31,7 @@
 
 #define ICS_SAI_HANDLE_1 hsai_BlockA1
 #define ICS_MDMA_HANDLE hmdma_mdma_channel0_sw_0
-#define ICS_RAM_BUF ".d1_buf"   // -> RAM_D1
+#define ICS_RAM_BUF ".d1_buf"    // -> RAM_D1
 #define ICS_DTCM_BUF ".dtcm_buf" // -> DTCMRAM
 
 // TDM frames are padded to the next supported slot count.
@@ -57,7 +58,12 @@
 static uint32_t _d1_capture[ICS_DMA_WORDS] __attribute__((section(ICS_RAM_BUF), aligned(32)));
 
 // Written by MDMA, read by the CPU. Interleaved Q31, [mic0 mic1 .. micN] per frame
-static audio_sample_t _dtcm_block[2][AUDIO_BLOCK_SAMPLES]
+static int32_t _dtcm_block[2][AUDIO_BLOCK_SAMPLES]
+    __attribute__((section(ICS_DTCM_BUF), aligned(32)));
+
+/* De-interleaved, normalized to [-1, 1). One row per mic.
+ * Valid until the next ics52000_read(). */
+static audio_sample_t _pcm[AUDIO_MIC_COUNT][AUDIO_SAMPLES_PER_BLOCK]
     __attribute__((section(ICS_DTCM_BUF), aligned(32)));
 
 /* --------- STATE --------- */
@@ -270,35 +276,44 @@ void ics52000_stop(void)
     _blocks_taken  = 0;
 }
 
-bool ics52000_read(const audio_sample_t** data)
+static void _extract_channel(const int32_t* src, uint32_t ch, audio_sample_t* dst)
 {
-    uint32_t ready = _blocks_landed;
+	for (uint32_t n = 0; n < AUDIO_SAMPLES_PER_BLOCK; ++n)
+		dst[n] = (audio_sample_t)src[n * AUDIO_MIC_COUNT + ch] * AUDIO_SAMPLE_SCALE;
+}
 
-    if (ready == _blocks_taken)
+/* On success *pcm points at [AUDIO_MIC_COUNT][AUDIO_SAMPLES_PER_BLOCK] floats
+ * in [-1, 1), valid until the next call. */
+bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK])
+{
+    uint32_t landed = _blocks_landed;
+
+    if (landed == _blocks_taken)
         return false;
 
-    // More than one block landed since the last call: the older ones are gone
-    if (ready - _blocks_taken > 1)
-        _stats.mdma_busy += ready - _blocks_taken - 1;
+    /* More than one block landed since the last call: the older ones are gone. */
+    if (landed - _blocks_taken > 1)
+        _stats.missed += landed - _blocks_taken - 1;
 
-    audio_sample_t* block = _dtcm_block[_half_landed];
+    const int32_t* block = _dtcm_block[_half_landed];
 
-    /* TODO: de-interleave + window + int->float here, into a caller-owned
-     * float buffer. Must happen before the staleness check below, so the
-     * check covers the whole time the block was in use. */
+    /* Copying out of the ping-pong buffer is what bounds the overwrite window.
+     * Nothing above this layer may hold a pointer into _dtcm_block. */
+    for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
+        _extract_channel(block, ch, _pcm[ch]);
 
     /* Ping-pong: block N and N+2 share memory. If two more landed while we
-     * were working, what we just read has been overwritten underneath us. */
-    if (_blocks_landed - ready >= 2)
+     * were copying, what we just read was overwritten underneath us. */
+    if (_blocks_landed - landed >= 2)
     {
         _stats.overwritten++;
         _blocks_taken = _blocks_landed;
         return false;
     }
 
-    _blocks_taken = ready;
-    _stats.blocks_delivered++;
-    *data = block;
+    _blocks_taken = landed;
+    _stats.delivered++;
+    *pcm = (const float32_t (*)[AUDIO_SAMPLES_PER_BLOCK])_pcm;
 
     return true;
 }

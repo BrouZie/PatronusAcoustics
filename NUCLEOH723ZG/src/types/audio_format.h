@@ -10,8 +10,9 @@
 // ============================================================================
 
 #include <stdint.h>
+#include <arm_math.h>
 
-typedef int32_t audio_sample_t;
+typedef float32_t audio_sample_t;
 
 typedef struct
 {
