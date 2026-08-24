@@ -7,7 +7,7 @@
 
 void app_main(void)
 {
-    const audio_sample_t* data;
+    const float32_t (*pcm)[AUDIO_SAMPLES_PER_BLOCK];
     audio_format_t fmt = ics52000_format();
 
     console_init();
@@ -15,22 +15,22 @@ void app_main(void)
 
     while (1)
     {
-        if (ics52000_read(&data))
+        if (ics52000_read(&pcm))
         {
             for (uint32_t i = 0; i < fmt.mic_count; ++i)
             {
-                int64_t sum_sq = 0;
-                int32_t peak   = 0;
+                float32_t sum_sq = 0.0f;
+                float32_t peak   = 0.0f;
                 for (uint32_t j = 0; j < fmt.samples_per_block; ++j)
                 {
-                    int32_t s  = data[j * fmt.mic_count + i];
-                    sum_sq    += (int64_t)s * s;
-                    int32_t a  = s < 0 ? -s : s;
+                    float32_t s = pcm[i][j];
+                    sum_sq     += s * s;
+                    float32_t a = fabsf(s);
                     if (a > peak)
                         peak = a;
                 }
-                float rms  = sqrtf((float)sum_sq / (fmt.samples_per_block));
-								float dbfs = 20.0f * log10f(rms / 2147483648.0f + 1e-20f);
+                float rms  = sqrtf(sum_sq / fmt.samples_per_block);
+				float dbfs = 20.0f * log10f(rms + 1e-20f);
                 // printf("%8ld %8ld %6d\t", (long)rms, (long)peak, (int)dbfs);
 				printf("%.1f", dbfs);
 				if (i + 1 < fmt.mic_count) printf(",");

@@ -45,10 +45,13 @@
 
 //--------- Derived. Don't edit by hand! ---------
 
+/* Largest positive sample magnitude, i.e. 0 dBFS. Float, because at 32 bits
+ * this does not fit in a signed 32-bit integer. */
+#define AUDIO_FULL_SCALE (1.0f * (1UL << (AUDIO_SAMPLE_BITS - 1)))
 
-// Largest positive sample magnitude, i.e. 0 dBFS. Replaces the 8388608.0f
-// that used to be hardcoded in src/dsp/.
-#define AUDIO_FULL_SCALE (1L << (AUDIO_SAMPLE_BITS - 1))
+/* Samples arrive left-justified in the slot, so the raw word reinterpreted as
+ * int32_t is already Q31 and this is the only scale needed to reach [-1, 1). */
+#define AUDIO_SAMPLE_SCALE (1.0f / AUDIO_FULL_SCALE)
 
 // Total samples in one interleaved block, all microphones.
 #define AUDIO_BLOCK_SAMPLES (AUDIO_SAMPLES_PER_BLOCK * AUDIO_MIC_COUNT)

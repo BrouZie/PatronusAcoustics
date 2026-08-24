@@ -227,10 +227,10 @@ SECTIONS
   } >DTCMRAM
 
   /* Raw audio buffer in RAM_D1 */
-  .raw_buf (NOLOAD) :
+  .d1_buf (NOLOAD) :
   {
 	  . = ALIGN(32);
-	  *(.raw_buf)
+	  *(.d1_buf)
 	  . = ALIGN(32);
   } >RAM_D1
 

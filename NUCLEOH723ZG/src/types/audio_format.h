@@ -10,7 +10,7 @@
 // ============================================================================
 
 #include <stdint.h>
-#include "arm_math.h"
+#include <arm_math.h>
 
 typedef float32_t audio_sample_t;
 
