@@ -58,8 +58,7 @@
 
 // --------- Invariants ---------
 
-_Static_assert(AUDIO_MIC_COUNT >= 1 && AUDIO_MIC_COUNT <= 8,
-               "SAI TDM frames carry at most 8 slots");
+_Static_assert(AUDIO_MIC_COUNT >= 1 && AUDIO_MIC_COUNT <= 8, "SAI TDM frames carry at most 8 slots");
 
 _Static_assert((AUDIO_SAMPLES_PER_BLOCK & (AUDIO_SAMPLES_PER_BLOCK - 1)) == 0,
                "AUDIO_SAMPLES_PER_BLOCK must be a power of two for the FFT");
