@@ -189,6 +189,8 @@ target_compile_options(cmsis_dsp PRIVATE -Ofast)
 
 target_link_libraries(drivers PRIVATE config)
 target_link_libraries(drivers PRIVATE cmsis_dsp)
+target_link_libraries(dsp PRIVATE config)
+target_link_libraries(dsp PRIVATE cmsis_dsp)
 
 # ---- end CMSIS-DSP ----
 
