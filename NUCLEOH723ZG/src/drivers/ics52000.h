@@ -8,11 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     uint32_t delivered;
-    uint32_t missed;       // reader too slow, block never seen
-    uint32_t overwritten;  // block clobbered mid-conversion
-    uint32_t mdma_busy;    // kick refused, block never left D1
+    uint32_t missed;      // reader too slow, block never seen
+    uint32_t overwritten; // block clobbered mid-conversion
+    uint32_t mdma_busy;   // kick refused, block never left D1
     uint32_t bus_errors;
     uint32_t mdma_errors;
     uint32_t last_hal_err;
@@ -23,6 +24,6 @@ bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK]);
 void ics52000_stop(void);
 
 audio_format_t ics52000_format(void);
-ics_stats_t* ics52000_stats(void);
+ics_stats_t*   ics52000_stats(void);
 
 #endif

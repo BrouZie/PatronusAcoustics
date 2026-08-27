@@ -14,8 +14,8 @@ static void blinky(void)
 
 void app_main(void)
 {
-	while (1)
-	{
-		blinky();
-	}
+    while (1)
+    {
+        blinky();
+    }
 }

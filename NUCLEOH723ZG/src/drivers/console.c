@@ -1,6 +1,6 @@
+#include "console.h"
 #include "main.h"
 #include "usart.h"
-#include "console.h"
 
 #include <stdio.h>
 

@@ -42,7 +42,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
 .PHONY: build all flash monitor test test-build configure configure-test \
-        compiledb list clean distclean debug gdbserver attach help
+        compiledb format list clean distclean debug gdbserver attach help
 
 # ---------------------------------------------------------------------------
 # Firmware
@@ -148,6 +148,9 @@ test: test-build
 # ---------------------------------------------------------------------------
 # Tooling
 # ---------------------------------------------------------------------------
+
+format:
+	find src -regex '.*\.\(c\|h\)' -exec clang-format -i {} \;
 
 # clangd looks for compile_commands.json in the project root.  Point it at the
 # firmware build -- that's where you want cross-compile flags and HAL headers.

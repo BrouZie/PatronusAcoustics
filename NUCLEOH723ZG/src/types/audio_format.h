@@ -9,8 +9,8 @@
 // headers - that is what keeps it safe for every module to depend on.
 // ============================================================================
 
-#include <stdint.h>
 #include <arm_math.h>
+#include <stdint.h>
 
 typedef float32_t audio_sample_t;
 
@@ -20,7 +20,7 @@ typedef struct
     uint32_t       mic_count;
     uint32_t       sample_rate_hz;
     uint32_t       sample_bits;
-    audio_sample_t full_scale;        // magnitude of 0 dBFS
+    audio_sample_t full_scale; // magnitude of 0 dBFS
 } audio_format_t;
 
 #endif
