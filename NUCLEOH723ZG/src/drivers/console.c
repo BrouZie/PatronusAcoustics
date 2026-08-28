@@ -1,6 +1,8 @@
 #include "console.h"
 #include "main.h"
 #include "usart.h"
+#include "mdma.h"
+#include "mpu.h"
 
 #include "arm_math_types.h"
 #include <stm32h7xx_hal_mdma.h>
@@ -34,7 +36,7 @@
 static float32_t _d2_output[2][OUTPUT_BUF_SIZE] __attribute__((section(OUTPUT_RAM_BUF), aligned(32)));
 
 static volatile uint8_t _dma_active_idx = 0;
-static volatile uint8_t _dma_busy = 0;     
+static volatile uint8_t _dma_busy = 0;
 static volatile uint8_t _mdma_busy = 0;   
 static uint8_t _pending_fill_idx = 0;    
 
