@@ -1,9 +1,6 @@
+#include "console.h"
 #include "main.h"
 #include "usart.h"
-#include "mdma.h"
-#include "console.h"
-#include "mpu.h"
-#include "audio_config.h"
 
 #include "arm_math_types.h"
 #include <stm32h7xx_hal_mdma.h>

@@ -60,8 +60,7 @@
 static uint32_t _d1_capture[ICS_DMA_WORDS] __attribute__((section(ICS_RAM_BUF), aligned(32)));
 
 // Written by MDMA, read by the CPU. Interleaved Q31, [mic0 mic1 .. micN] per frame
-static int32_t _dtcm_block[2][AUDIO_BLOCK_SAMPLES]
-    __attribute__((section(ICS_DTCM_BUF), aligned(32)));
+static int32_t _dtcm_block[2][AUDIO_BLOCK_SAMPLES] __attribute__((section(ICS_DTCM_BUF), aligned(32)));
 
 /* De-interleaved, normalized to [-1, 1). One row per mic.
  * Valid until the next ics52000_read(). */
@@ -76,7 +75,7 @@ static volatile uint32_t _blocks_sent;    // halves handed to the MDMA
 static volatile uint32_t _blocks_landed;  // halves landed in _raw_block
 static volatile uint32_t _half_in_flight; // which half is in flight
 static volatile uint32_t _half_landed;    // which half last landed
-static uint32_t _blocks_taken;            // main context only
+static uint32_t          _blocks_taken;   // main context only
 
 /* --------- MDMA --------- */
 
@@ -228,7 +227,7 @@ void ics52000_start(void)
     HAL_TIM_Base_Start_IT(&htim7);
 }
 
-void ics52000_stop_fft(void)
+void ics52000_stop(void)
 {
     HAL_TIM_Base_Stop_IT(&htim7);
     HAL_MDMA_Abort(&ICS_MDMA_HANDLE);
@@ -241,8 +240,8 @@ void ics52000_stop_fft(void)
 
 static void _extract_channel(const int32_t* src, uint32_t ch, audio_sample_t* dst)
 {
-	for (uint32_t n = 0; n < AUDIO_SAMPLES_PER_BLOCK; ++n)
-		dst[n] = (audio_sample_t)src[n * AUDIO_MIC_COUNT + ch] * AUDIO_SAMPLE_SCALE;
+    for (uint32_t n = 0; n < AUDIO_SAMPLES_PER_BLOCK; ++n)
+        dst[n] = (audio_sample_t)src[n * AUDIO_MIC_COUNT + ch] * AUDIO_SAMPLE_SCALE;
 }
 
 /* On success *pcm points at [AUDIO_MIC_COUNT][AUDIO_SAMPLES_PER_BLOCK] floats
@@ -276,7 +275,7 @@ bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK])
 
     _blocks_taken = landed;
     _stats.delivered++;
-    *pcm = (const float32_t (*)[AUDIO_SAMPLES_PER_BLOCK])_pcm;
+    *pcm = (const float32_t(*)[AUDIO_SAMPLES_PER_BLOCK])_pcm;
 
     return true;
 }
@@ -292,7 +291,4 @@ audio_format_t ics52000_format(void)
     };
 }
 
-ics_stats_t* ics52000_stats(void)
-{
-    return (ics_stats_t*)&_stats;
-}
+ics_stats_t* ics52000_stats(void) { return (ics_stats_t*)&_stats; }

@@ -38,11 +38,6 @@
 #define AUDIO_SAMPLES_PER_BLOCK 512
 #endif
 
-// Fast Fourier Tranform buffer
-#ifndef FFT_BUFFER_SIZE
-#define FFT_BUFFER_SIZE AUDIO_SAMPLES_PER_BLOCK
-#endif
-
 //--------- Derived. Don't edit by hand! ---------
 
 /* Largest positive sample magnitude, i.e. 0 dBFS. Float, because at 32 bits
@@ -56,10 +51,20 @@
 // Total samples in one interleaved block, all microphones.
 #define AUDIO_BLOCK_SAMPLES (AUDIO_SAMPLES_PER_BLOCK * AUDIO_MIC_COUNT)
 
+// Fast Fourier Tranform buffer
+#ifndef FFT_BUFFER_SIZE
+#define FFT_BUFFER_SIZE AUDIO_SAMPLES_PER_BLOCK
+#endif
+
+// A real FFT of N points has N/2 + 1 distinct bins (DC .. Nyquist)
+#define SPECTRUM_BINS (FFT_BUFFER_SIZE / 2 + 1)
+
+// Two floats per bin, expanded from the CMSIS packed layout
+#define SPECTRUM_FLOATS (2 * SPECTRUM_BINS)
+
 // --------- Invariants ---------
 
-_Static_assert(AUDIO_MIC_COUNT >= 1 && AUDIO_MIC_COUNT <= 8,
-               "SAI TDM frames carry at most 8 slots");
+_Static_assert(AUDIO_MIC_COUNT >= 1 && AUDIO_MIC_COUNT <= 8, "SAI TDM frames carry at most 8 slots");
 
 _Static_assert((AUDIO_SAMPLES_PER_BLOCK & (AUDIO_SAMPLES_PER_BLOCK - 1)) == 0,
                "AUDIO_SAMPLES_PER_BLOCK must be a power of two for the FFT");
