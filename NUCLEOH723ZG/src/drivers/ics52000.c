@@ -3,9 +3,9 @@
 #include "arm_math_types.h"
 #include "audio_config.h"
 #include "audio_format.h"
-#include "mpu.h"
 #include "main.h"
 #include "mdma.h"
+#include "mpu.h"
 #include "sai.h"
 #include "tim.h"
 
@@ -72,7 +72,7 @@ static audio_sample_t _pcm[AUDIO_MIC_COUNT][AUDIO_SAMPLES_PER_BLOCK]
 static volatile ics_stats_t _stats; // written from ISRs, read from main
 
 static volatile uint32_t _blocks_sent;    // halves handed to the MDMA
-static volatile uint32_t _blocks_landed;  // halves landed in _raw_block
+static volatile uint32_t _blocks_landed;  // halves landed in _dtcm_block
 static volatile uint32_t _half_in_flight; // which half is in flight
 static volatile uint32_t _half_landed;    // which half last landed
 static uint32_t          _blocks_taken;   // main context only
@@ -92,9 +92,9 @@ static void _mdma_error(MDMA_HandleTypeDef* hmdma)
     _stats.last_hal_err = hmdma->ErrorCode;
 }
 
-/* Move one half of _dma_buf into the matching _raw_block. On HAL_BUSY the
- * transfer never starts, so _chunks_kicked must not advance either -- that is
- * what keeps _kicked_half and _ready_half in agreement. */
+/* Move one half of _d1_capture into the matching _raw_block. On HAL_BUSY the
+ * transfer never starts, so _blocks_sent must not advance either -- that is
+ * what keeps _half_in_flight and _half_landed in agreement. */
 static void _mdma_kick(uint32_t half)
 {
     if (HAL_MDMA_Start_IT(&ICS_MDMA_HANDLE, (uint32_t)&_d1_capture[half * AUDIO_BLOCK_SAMPLES],
