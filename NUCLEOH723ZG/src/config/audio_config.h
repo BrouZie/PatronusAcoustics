@@ -21,7 +21,7 @@
 // --------- Tunables ---------
 
 #ifndef AUDIO_MIC_COUNT
-#define AUDIO_MIC_COUNT 1
+#define AUDIO_MIC_COUNT 2
 #endif
 
 #ifndef AUDIO_SAMPLE_RATE_HZ
@@ -56,13 +56,15 @@
 #define ICS_FRAME_SAMPLES (2 * ICS_HOP_SAMPLES)
 
 // Fast Fourier Tranform buffer
-#ifndef FFT_BUFFER_SIZE
-#define FFT_BUFFER_SIZE ICS_FRAME_SAMPLES
+#ifndef SPECTRUM_FFT_SIZE
+#define SPECTRUM_FFT_SIZE ICS_FRAME_SAMPLES
+// #ifndef SPECTRUM_FFT_SIZE
+// #define SPECTRUM_FFT_SIZE AUDIO_SAMPLES_PER_BLOCK
 #endif
 
 
 // A real FFT of N points has N/2 + 1 distinct bins (DC .. Nyquist)
-#define SPECTRUM_BINS (FFT_BUFFER_SIZE / 2 + 1)
+#define SPECTRUM_BINS (SPECTRUM_FFT_SIZE / 2 + 1)
 
 // Two floats per bin, expanded from the CMSIS packed layout
 #define SPECTRUM_FLOATS (2 * SPECTRUM_BINS)
