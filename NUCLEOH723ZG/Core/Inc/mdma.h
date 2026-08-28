@@ -31,6 +31,7 @@
 
 /* MDMA transfer handles -----------------------------------------------------*/
 extern MDMA_HandleTypeDef hmdma_mdma_channel0_sw_0;
+extern MDMA_HandleTypeDef hmdma_mdma_channel1_sw_0;
 
 /* USER CODE BEGIN Includes */
 

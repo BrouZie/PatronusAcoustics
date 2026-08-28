@@ -3,6 +3,7 @@
 #include "arm_math_types.h"
 #include "audio_config.h"
 #include "audio_format.h"
+#include "mpu.h"
 #include "main.h"
 #include "mdma.h"
 #include "sai.h"
@@ -144,45 +145,6 @@ void HAL_SAI_ErrorCallback(SAI_HandleTypeDef* hsai)
     _stats.last_hal_err = hsai->ErrorCode;
 }
 
-/* --------- MPU --------- */
-
-/* Smallest power-of-two region that covers the buffer, as an MPU size code. */
-static inline uint8_t _mpu_size(uint32_t bytes)
-{
-    uint32_t size = 32;
-
-    while (size < bytes)
-        size <<= 1;
-
-    return (uint8_t)(__builtin_ctz(size) - 1);
-}
-
-/* Marks _dma_buf as Normal non-cacheable (TEX=001, C=0, B=0) so the SAI DMA
- * and the MDMA see the same bytes the CPU would. Note the region is rounded up
- * to a power of two -- the linker script must pad .d1_buf to match so no other
- * data falls inside it. */
-static void _mpu_configure(void)
-{
-    MPU_Region_InitTypeDef r = { 0 };
-
-    HAL_MPU_Disable();
-
-    r.Enable           = MPU_REGION_ENABLE;
-    r.Number           = MPU_REGION_NUMBER0;
-    r.BaseAddress      = (uint32_t)_d1_capture;
-    r.Size             = _mpu_size(sizeof(_d1_capture));
-    r.SubRegionDisable = 0x0;
-    r.TypeExtField     = MPU_TEX_LEVEL1;
-    r.AccessPermission = MPU_REGION_FULL_ACCESS;
-    r.DisableExec      = MPU_INSTRUCTION_ACCESS_DISABLE;
-    r.IsShareable      = MPU_ACCESS_SHAREABLE;
-    r.IsCacheable      = MPU_ACCESS_NOT_CACHEABLE;
-    r.IsBufferable     = MPU_ACCESS_NOT_BUFFERABLE;
-
-    HAL_MPU_ConfigRegion(&r);
-    HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
-}
-
 /* --------- STARTUP SEQUENCE --------- */
 
 /* The ICS-52000 assigns itself a TDM slot by counting SCK edges while WS is
@@ -228,7 +190,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 void ics52000_start(void)
 {
-    _mpu_configure();
+    _mpu_configure(_d1_capture, sizeof(_d1_capture));
     _mdma_configure();
 
     HAL_SAI_DeInit(&ICS_SAI_HANDLE_1);

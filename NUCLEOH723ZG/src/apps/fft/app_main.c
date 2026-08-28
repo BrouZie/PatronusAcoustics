@@ -12,9 +12,10 @@ void app_main(void)
 	const float32_t (*pcm)[512];
 	float32_t (*spec)[514] = {};
 
-	ics52000_start();
-	spectrum_init();
-	console_init();
+	// console_init();
+	UART_DMA_start();
+    ics52000_start();
+	arm_rfft_fast_init_f32(&_fft_handler, AUDIO_SAMPLES_PER_BLOCK);
 
 	uint16_t hz;
 	float32_t threshold = 0.5;

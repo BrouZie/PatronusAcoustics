@@ -252,6 +252,12 @@ SECTIONS
 	  *(.dtcm_fft_buf)
   } >DTCMRAM
 
+  /* USART output buffer in RAM_D2 */
+  .d2_buf (NOLOAD) :
+  {
+	  *(.d2_buf)
+  } >RAM_D2
+
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 
   PROVIDE( __bss_start = __tbss_start );
