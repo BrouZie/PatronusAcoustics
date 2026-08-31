@@ -20,7 +20,7 @@ typedef struct
 } ics_stats_t;
 
 void ics52000_start(void);
-bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK]);
+bool ics52000_read(float32_t* frame[AUDIO_MIC_COUNT]);
 void ics52000_stop(void);
 
 audio_format_t ics52000_format(void);

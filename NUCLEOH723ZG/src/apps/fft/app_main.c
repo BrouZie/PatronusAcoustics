@@ -9,8 +9,8 @@
 
 void app_main(void)
 {
-	const float32_t (*pcm)[512];
-	float32_t (*spec)[514] = {};
+	float32_t* frame[AUDIO_MIC_COUNT];
+	float32_t spec[AUDIO_MIC_COUNT][SPECTRUM_FLOATS];
 
 	console_init();
 	spectrum_init();
@@ -21,12 +21,12 @@ void app_main(void)
 
 	while (1)
 	{
-		if (ics52000_read(&pcm))
+		if (ics52000_read(frame))
 		{
-			spectrum_compute(pcm, spec);
+			spectrum_compute(frame, spec);
 
 			// Increment over all frequency bins, each bin contains a real and imaginary part
-			for (uint16_t index = 0; index < AUDIO_SAMPLES_PER_BLOCK + 2; index += 2)
+			for (uint16_t index = 0; index < FFT_BUFFER_SIZE + 2; index += 2)
 			{
 				float32_t re = (*spec)[index];
 				float32_t im = (*spec)[index + 1];
@@ -34,11 +34,11 @@ void app_main(void)
 				if (magnitude > threshold)
 				{
 					uint16_t bin = index / 2;
-					hz = (uint16_t)((float32_t)bin * AUDIO_SAMPLE_RATE_HZ / (float32_t)AUDIO_SAMPLES_PER_BLOCK);
+					hz = (uint16_t)((float32_t)bin * AUDIO_SAMPLE_RATE_HZ / (float32_t)FFT_BUFFER_SIZE);
 					printf("Magnitude:%.3f\r\n", magnitude);
 					printf("Hz:%u\r\n", hz);
 				}
 			}
 		}
 	}
-}		
+}
