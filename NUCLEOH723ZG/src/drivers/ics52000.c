@@ -8,6 +8,7 @@
 #include "mdma.h"
 #include "sai.h"
 #include "tim.h"
+#include <stdint.h>
 
 /*
  * Capture path
@@ -62,9 +63,8 @@ static uint32_t _d1_capture[ICS_DMA_WORDS] __attribute__((section(ICS_RAM_BUF), 
 // Written by MDMA, read by the CPU. Interleaved Q31, [mic0 mic1 .. micN] per frame
 static int32_t _dtcm_block[2][AUDIO_BLOCK_SAMPLES] __attribute__((section(ICS_DTCM_BUF), aligned(32)));
 
-/* De-interleaved, normalized to [-1, 1). One row per mic.
- * Valid until the next ics52000_read(). */
-static audio_sample_t _pcm[AUDIO_MIC_COUNT][AUDIO_SAMPLES_PER_BLOCK]
+/* History buffer storing current and previous frame data, with a mirrored copy. */
+static audio_sample_t _pcm_hist[AUDIO_MIC_COUNT][2 * ICS_FRAME_SAMPLES]
     __attribute__((section(ICS_DTCM_BUF), aligned(32)));
 
 /* --------- STATE --------- */
@@ -76,7 +76,9 @@ static volatile uint32_t _blocks_landed;  // halves landed in _raw_block
 static volatile uint32_t _half_in_flight; // which half is in flight
 static volatile uint32_t _half_landed;    // which half last landed
 static uint32_t          _blocks_taken;   // main context only
-
+static uint32_t          _hist_pos;       // multiple of ICS_HOP_SAMPLES, in [0, 2*ICS_FRAME_SAMPLES)
+static bool              _hist_primed;    // false until the first hop has been folded in
+							  //
 /* --------- MDMA --------- */
 
 static void _mdma_cplt(MDMA_HandleTypeDef* hmdma)
@@ -212,6 +214,8 @@ void ics52000_start(void)
     _blocks_taken   = 0;
     _half_in_flight = 0;
     _half_landed    = 0;
+	_hist_pos       = 0;
+	_hist_primed    = false;
 
     for (uint32_t i = 0; i < sizeof(_stats) / sizeof(uint32_t); ++i)
         ((volatile uint32_t*)&_stats)[i] = 0;
@@ -238,15 +242,24 @@ void ics52000_stop(void)
     _blocks_taken  = 0;
 }
 
-static void _extract_channel(const int32_t* src, uint32_t ch, audio_sample_t* dst)
+/* Extract one channel from interleaved input and store it at both history positions. */
+static void _extract_channel(const int32_t* src, uint32_t ch, uint32_t pos, uint32_t mirror)
 {
-    for (uint32_t n = 0; n < AUDIO_SAMPLES_PER_BLOCK; ++n)
-        dst[n] = (audio_sample_t)src[n * AUDIO_MIC_COUNT + ch] * AUDIO_SAMPLE_SCALE;
+    for (uint32_t n = 0; n < ICS_HOP_SAMPLES; ++n)
+	{
+		audio_sample_t sample = (audio_sample_t)src[n * AUDIO_MIC_COUNT + ch] * AUDIO_SAMPLE_SCALE;
+		_pcm_hist[ch][pos + n] = sample;
+		_pcm_hist[ch][mirror + n] = sample;
+
+	}
 }
 
-/* On success *pcm points at [AUDIO_MIC_COUNT][AUDIO_SAMPLES_PER_BLOCK] floats
- * in [-1, 1), valid until the next call. */
-bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK])
+/* On success, frame[ch] points at ICS_FRAME_SAMPLES samples/channel:
+ * [older hop][newer hop], 50% overlapped with the previous successful call.
+ * Valid until the next call. Returns false with frame untouched on the
+ * first landed hop (no history yet), when no new hop has landed, and on
+ * overwrite (a hop was lost before it could be read). */
+bool ics52000_read(float32_t* frame[AUDIO_MIC_COUNT])
 {
     uint32_t landed = _blocks_landed;
 
@@ -258,11 +271,12 @@ bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK])
         _stats.missed += landed - _blocks_taken - 1;
 
     const int32_t* block = _dtcm_block[_half_landed];
+	const uint32_t mirror = (_hist_pos + ICS_FRAME_SAMPLES) % (2 * ICS_FRAME_SAMPLES);
 
     /* Copying out of the ping-pong buffer is what bounds the overwrite window.
      * Nothing above this layer may hold a pointer into _dtcm_block. */
     for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
-        _extract_channel(block, ch, _pcm[ch]);
+        _extract_channel(block, ch, _hist_pos, mirror);
 
     /* Ping-pong: block N and N+2 share memory. If two more landed while we
      * were copying, what we just read was overwritten underneath us. */
@@ -274,16 +288,28 @@ bool ics52000_read(const float32_t (**pcm)[AUDIO_SAMPLES_PER_BLOCK])
     }
 
     _blocks_taken = landed;
-    _stats.delivered++;
-    *pcm = (const float32_t(*)[AUDIO_SAMPLES_PER_BLOCK])_pcm;
+	_hist_pos = (_hist_pos + ICS_HOP_SAMPLES) % (2 * ICS_FRAME_SAMPLES);
 
+	/* First hop has no history, therefore ignore*/	
+	if (!_hist_primed)
+	{
+	 	_hist_primed = true;
+		return false;
+	}
+
+	/* Pointer to the first sample of the frame*/
+	const uint32_t frame_start = _hist_pos % ICS_FRAME_SAMPLES;
+	for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
+		frame[ch] = &_pcm_hist[ch][frame_start];
+
+    _stats.delivered++;
     return true;
 }
 
 audio_format_t ics52000_format(void)
 {
     return (audio_format_t) {
-        .samples_per_block = AUDIO_SAMPLES_PER_BLOCK,
+        .samples_per_block = ICS_FRAME_SAMPLES,
         .mic_count         = AUDIO_MIC_COUNT,
         .sample_rate_hz    = AUDIO_SAMPLE_RATE_HZ,
         .sample_bits       = AUDIO_SAMPLE_BITS,

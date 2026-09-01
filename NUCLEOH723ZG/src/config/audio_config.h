@@ -51,10 +51,15 @@
 // Total samples in one interleaved block, all microphones.
 #define AUDIO_BLOCK_SAMPLES (AUDIO_SAMPLES_PER_BLOCK * AUDIO_MIC_COUNT)
 
+/* One landed _dtcm_block half = one hop. Output frames are 2 hops: 50% overlap. */
+#define ICS_HOP_SAMPLES AUDIO_SAMPLES_PER_BLOCK
+#define ICS_FRAME_SAMPLES (2 * ICS_HOP_SAMPLES)
+
 // Fast Fourier Tranform buffer
 #ifndef FFT_BUFFER_SIZE
-#define FFT_BUFFER_SIZE AUDIO_SAMPLES_PER_BLOCK
+#define FFT_BUFFER_SIZE ICS_FRAME_SAMPLES
 #endif
+
 
 // A real FFT of N points has N/2 + 1 distinct bins (DC .. Nyquist)
 #define SPECTRUM_BINS (FFT_BUFFER_SIZE / 2 + 1)

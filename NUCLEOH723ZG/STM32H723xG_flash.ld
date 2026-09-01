@@ -235,9 +235,9 @@ SECTIONS
   } >RAM_D1
 
   /* Raw audio buffer in DTCM */
-  .dtcm_raw_buf (NOLOAD) :
+  .dtcm_buf (NOLOAD) :
   {
-	  *(.dtcm_raw_buf)
+	  *(.dtcm_buf)
   } >DTCMRAM
 
   /* Windowed audio buffer in DTCM */

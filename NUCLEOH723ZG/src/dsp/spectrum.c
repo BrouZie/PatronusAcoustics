@@ -57,15 +57,15 @@ void spectrum_init(void)
     arm_rfft_fast_init_f32(&_rfft, FFT_BUFFER_SIZE);
 }
 
-void spectrum_compute(const float32_t (*pcm)[AUDIO_SAMPLES_PER_BLOCK], float32_t (*spec)[SPECTRUM_FLOATS])
+void spectrum_compute(float32_t* const frame[AUDIO_MIC_COUNT], float32_t (*spec)[SPECTRUM_FLOATS])
 {
     for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
     {
         /* DC before windowing: windowing an offset signal smears it across the
          * low bins instead of leaving it in bin 0 where it is easy to ignore. */
         float32_t mean;
-        arm_mean_f32((float32_t*)pcm[ch], FFT_BUFFER_SIZE, &mean);
-        arm_offset_f32((float32_t*)pcm[ch], -mean, _td, FFT_BUFFER_SIZE);
+        arm_mean_f32((float32_t*)frame[ch], FFT_BUFFER_SIZE, &mean);
+        arm_offset_f32((float32_t*)frame[ch], -mean, _td, FFT_BUFFER_SIZE);
 
         arm_mult_f32(_td, _window, _td, FFT_BUFFER_SIZE);
 
