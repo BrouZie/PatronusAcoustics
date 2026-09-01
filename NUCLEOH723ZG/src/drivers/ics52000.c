@@ -63,8 +63,7 @@ static uint32_t _d1_capture[ICS_DMA_WORDS] __attribute__((section(ICS_RAM_BUF), 
 // Written by MDMA, read by the CPU. Interleaved Q31, [mic0 mic1 .. micN] per frame
 static int32_t _dtcm_block[2][AUDIO_BLOCK_SAMPLES] __attribute__((section(ICS_DTCM_BUF), aligned(32)));
 
-/* De-interleaved, normalized to [-1, 1). One row per mic.
- * Valid until the next ics52000_read(). */
+/* History buffer storing current and previous frame data, with a mirrored copy. */
 static audio_sample_t _pcm_hist[AUDIO_MIC_COUNT][2 * ICS_FRAME_SAMPLES]
     __attribute__((section(ICS_DTCM_BUF), aligned(32)));
 
@@ -77,9 +76,8 @@ static volatile uint32_t _blocks_landed;  // halves landed in _raw_block
 static volatile uint32_t _half_in_flight; // which half is in flight
 static volatile uint32_t _half_landed;    // which half last landed
 static uint32_t          _blocks_taken;   // main context only
-
-static uint32_t _hist_pos;    // multiple of ICS_HOP_SAMPLES, in [0, 2*ICS_FRAME_SAMPLES)
-static bool     _hist_primed; // false until the first hop has been folded in
+static uint32_t          _hist_pos;       // multiple of ICS_HOP_SAMPLES, in [0, 2*ICS_FRAME_SAMPLES)
+static bool              _hist_primed;    // false until the first hop has been folded in
 							  //
 /* --------- MDMA --------- */
 
@@ -216,8 +214,8 @@ void ics52000_start(void)
     _blocks_taken   = 0;
     _half_in_flight = 0;
     _half_landed    = 0;
-	_hist_pos = 0;
-	_hist_primed = false;
+	_hist_pos       = 0;
+	_hist_primed    = false;
 
     for (uint32_t i = 0; i < sizeof(_stats) / sizeof(uint32_t); ++i)
         ((volatile uint32_t*)&_stats)[i] = 0;
@@ -244,6 +242,7 @@ void ics52000_stop(void)
     _blocks_taken  = 0;
 }
 
+/* Extract one channel from interleaved input and store it at both history positions. */
 static void _extract_channel(const int32_t* src, uint32_t ch, uint32_t pos, uint32_t mirror)
 {
     for (uint32_t n = 0; n < ICS_HOP_SAMPLES; ++n)
@@ -298,6 +297,7 @@ bool ics52000_read(float32_t* frame[AUDIO_MIC_COUNT])
 		return false;
 	}
 
+	/* Pointer to the first sample of the frame*/
 	const uint32_t frame_start = _hist_pos % ICS_FRAME_SAMPLES;
 	for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
 		frame[ch] = &_pcm_hist[ch][frame_start];
