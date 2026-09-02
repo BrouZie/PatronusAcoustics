@@ -13,6 +13,7 @@ Run from the repo root with uv:
 
 import sys
 
+import signal
 import numpy as np
 import pyqtgraph as pg
 import serial
@@ -23,8 +24,8 @@ from pyqtgraph.Qt import QtCore
 # serial device.
 # ---------------------------------------------------------------------------
 RATE = 48000     # AUDIO_SAMPLE_RATE_HZ
-FFT = 512        # SPECTRUM_FFT_SIZE
-MICS = 2         # AUDIO_MIC_COUNT
+FFT  = 1024      # SPECTRUM_FFT_SIZE
+MICS = 1         # AUDIO_MIC_COUNT
 PORT = "/dev/ttyACM0"
 BAUD = 921600
 
@@ -97,6 +98,9 @@ def poll():
 
 
 def main():
+    print("="*90)
+    print("NB: baud rate (921600) of current USART setup limits this script to run at maximum 1 mic")
+    print("="*90)
     global mics, bins, fl_ch, fl_frame, frame_bytes, freqs, nyquist, port, buf
     global idle_ticks, nframes, mags, pk_line, label
 
@@ -144,9 +148,27 @@ def main():
     timer.timeout.connect(poll)
     timer.start(20)
 
-    app.exec()
-    port.close()
+    # Let Ctrl+C (SIGINT) terminate the Qt event loop cleanly.
+    def handle_sigint(signum, frame):
+        print("\nClosing spectrum viewer...")
+        app.quit()
 
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    # Qt's event loop can otherwise prevent Python from processing SIGINT.
+    # This timer periodically returns control to Python.
+    sigint_timer = QtCore.QTimer()
+    sigint_timer.timeout.connect(lambda: None)
+    sigint_timer.start(100)
+
+    try:
+        app.exec()
+    finally:
+        timer.stop()
+        sigint_timer.stop()
+        if port.is_open:
+            port.close()
+        win.close()
 
 if __name__ == "__main__":
     main()

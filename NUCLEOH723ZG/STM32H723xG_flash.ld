@@ -234,25 +234,13 @@ SECTIONS
 	  . = ALIGN(32);
   } >RAM_D1
 
-  /* Raw audio buffer in DTCM */
+  /* DTCM buffer entry */
   .dtcm_buf (NOLOAD) :
   {
 	  *(.dtcm_buf)
   } >DTCMRAM
 
-  /* Windowed audio buffer in DTCM */
-  .dtcm_windowed_buf (NOLOAD) :
-  {
-	  *(.dtcm_windowed_buf)
-  } >DTCMRAM
-
-  /* FFT buffer in DTCM */
-  .dtcm_fft_buf (NOLOAD) :
-  {
-	  *(.dtcm_fft_buf)
-  } >DTCMRAM
-
-  /* USART output buffer in RAM_D2 */
+  /* RAM_D2 buffer for USART output */
   .d2_buf (NOLOAD) :
   {
 	  *(.d2_buf)
