@@ -18,7 +18,7 @@
 APP     ?= usart_echo
 BUILD   ?= Debug
 PORT    ?= /dev/ttyACM0
-BAUD    ?= 115200
+BAUD    ?= 921600
 TEST    ?=
 JOBS    ?=
 

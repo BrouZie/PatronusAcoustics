@@ -14,34 +14,49 @@
  * instead of special-casing the packed first two floats.
  */
 
-#define DTCM_BUF ".dtcm_buf"
+// CMSIS-DSP configuration instance
+static arm_rfft_fast_instance_f32 _rfft_cfg;
+
+/* --------- LINKER BINDINGS --------- */
+
+#define SPECTRUM_DTCM_BUF ".dtcm_buf"
+
+/* --------- ANALYSIS BUFFERS --------- */
+
+/* OUTPUT BUFFER - the caller is handed a pointer to this specific buffer!
+ * (specifically a pointer to the first row of the 2D array). */
+static float32_t _SPECTRUM[AUDIO_MIC_COUNT][SPECTRUM_FLOATS] __attribute__((section(SPECTRUM_DTCM_BUF), aligned(32)));
 
 /* Periodic Hann (divide by N, not N-1): the block is one period of a
  * continuing signal, and 50%-overlapped periodic Hann sums to unity. */
-static float32_t _window[FFT_BUFFER_SIZE];
-
-static arm_rfft_fast_instance_f32 _rfft;
+static float32_t _hann[SPECTRUM_FFT_SIZE];
 
 /* arm_rfft_fast_f32 destroys its input, so windowing happens in scratch and
  * the caller's pcm stays intact for level metering, raw dumps, and tests. */
-static float32_t _td[FFT_BUFFER_SIZE] __attribute__((section(DTCM_BUF), aligned(32)));
-static float32_t _packed[FFT_BUFFER_SIZE] __attribute__((section(DTCM_BUF), aligned(32)));
+static float32_t _windowed[SPECTRUM_FFT_SIZE] __attribute__((section(SPECTRUM_DTCM_BUF), aligned(32)));
 
-static void _window_init(void)
+// CMSIS packed layout, one channel, valid only inside spectrum_compute()
+static float32_t _packed[SPECTRUM_FFT_SIZE] __attribute__((section(SPECTRUM_DTCM_BUF), aligned(32)));
+
+/* --------- WINDOW --------- */
+
+static void _hann_init(void)
 {
-    for (uint32_t n = 0; n < FFT_BUFFER_SIZE; ++n)
-        _window[n] = 0.5f * (1.0f - arm_cos_f32(2.0f * PI * (float32_t)n / (float32_t)FFT_BUFFER_SIZE));
+    for (uint32_t n = 0; n < SPECTRUM_FFT_SIZE; ++n)
+        _hann[n] = 0.5f * (1.0f - arm_cos_f32(2.0f * PI * (float32_t)n / (float32_t)SPECTRUM_FFT_SIZE));
 }
+
+/* --------- BIN EXPANSION --------- */
 
 /* CMSIS packs the real FFT as [0]=DC, [1]=Nyquist (both purely real), then
  * [2k],[2k+1] = Re,Im for k = 1 .. N/2-1. Expanding once here means neither
  * consumer has to remember that. */
-static void _unpack(const float32_t* packed, float32_t* out)
+static void _expand_bins(const float32_t* packed, float32_t* out)
 {
     out[0] = packed[0]; // DC - real
     out[1] = 0.0f;      // DC - imaginary
 
-    for (uint32_t k = 1; k < FFT_BUFFER_SIZE / 2; ++k)
+    for (uint32_t k = 1; k < SPECTRUM_FFT_SIZE / 2; ++k)
     {
         out[2 * k]     = packed[2 * k];
         out[2 * k + 1] = packed[2 * k + 1];
@@ -51,25 +66,37 @@ static void _unpack(const float32_t* packed, float32_t* out)
     out[2 * (SPECTRUM_BINS - 1) + 1] = 0.0f;      // Nyquist - imaginary
 }
 
+/* --------- PUBLIC API --------- */
+
 void spectrum_init(void)
 {
-    _window_init();
-    arm_rfft_fast_init_f32(&_rfft, FFT_BUFFER_SIZE);
+    _hann_init();
+    arm_rfft_fast_init_f32(&_rfft_cfg, SPECTRUM_FFT_SIZE);
 }
 
-void spectrum_compute(float32_t* const frame[AUDIO_MIC_COUNT], float32_t (*spec)[SPECTRUM_FLOATS])
+/* CMSIS takes non-const pointers even for pure reads, so the const cast is
+ * confined here rather than repeated at every call site. */
+static void _analyze_channel(float32_t* pcm, float32_t* bins)
+{
+    /* DC before windowing: windowing an offset signal smears it across the
+     * low bins instead of leaving it in bin 0 where it is easy to ignore. */
+    float32_t dc;
+    arm_mean_f32(pcm, SPECTRUM_FFT_SIZE, &dc);
+    arm_offset_f32(pcm, -dc, _windowed, SPECTRUM_FFT_SIZE);
+
+    arm_mult_f32(_windowed, _hann, _windowed, SPECTRUM_FFT_SIZE);
+    arm_rfft_fast_f32(&_rfft_cfg, _windowed, _packed, 0);
+
+    _expand_bins(_packed, bins);
+}
+
+void spectrum_compute(float32_t* const frame[AUDIO_MIC_COUNT], float32_t (**spec)[SPECTRUM_FLOATS])
 {
     for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
-    {
-        /* DC before windowing: windowing an offset signal smears it across the
-         * low bins instead of leaving it in bin 0 where it is easy to ignore. */
-        float32_t mean;
-        arm_mean_f32((float32_t*)frame[ch], FFT_BUFFER_SIZE, &mean);
-        arm_offset_f32((float32_t*)frame[ch], -mean, _td, FFT_BUFFER_SIZE);
+	{
+		_analyze_channel(frame[ch], _SPECTRUM[ch]);
+	}
 
-        arm_mult_f32(_td, _window, _td, FFT_BUFFER_SIZE);
-
-        arm_rfft_fast_f32(&_rfft, _td, _packed, 0);
-        _unpack(_packed, spec[ch]);
-    }
+	// Pointer to the first row of spectrum samples
+	*spec = &_SPECTRUM[0];
 }
