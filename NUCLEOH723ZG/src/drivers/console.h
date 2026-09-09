@@ -5,7 +5,7 @@
 #include "stdint.h"
 
 void console_init(void);
-void UART_MDMA_send_buffer(float32_t* block);
+void UART_MDMA_send_buffer(float32_t* block, uint32_t size);
 void UART_DMA_start(void);
 
 #endif
