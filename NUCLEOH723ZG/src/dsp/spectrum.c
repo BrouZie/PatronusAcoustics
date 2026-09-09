@@ -90,7 +90,7 @@ static void _analyze_channel(float32_t* pcm, float32_t* bins)
     _expand_bins(_packed, bins);
 }
 
-void spectrum_compute(float32_t* const frame[AUDIO_MIC_COUNT], float32_t (**spec)[SPECTRUM_FLOATS])
+void spectrum_compute(float32_t* const frame[AUDIO_MIC_COUNT], const float32_t (**spec)[SPECTRUM_FLOATS])
 {
     for (uint32_t ch = 0; ch < AUDIO_MIC_COUNT; ++ch)
 	{
