@@ -26,7 +26,7 @@
  */
 
 #define OUTPUT_RAM_BUF ".d2_buf" // -> RAM_D2
-#define OUTPUT_BUF_SIZE 514
+#define OUTPUT_BUF_SIZE SPECTRUM_FLOATS
 
 #define USART_MDMA_HANDLE hmdma_mdma_channel1_sw_0
 #define USART_DMA_HANDLE hdma_usart3_tx
@@ -83,7 +83,7 @@ void UART_DMA_start(void)
     HAL_MDMA_RegisterCallback(&USART_MDMA_HANDLE, HAL_MDMA_XFER_CPLT_CB_ID, &MDMA_transfer_complete);
 }
 
-void UART_MDMA_send_buffer(float32_t* block)
+void UART_MDMA_send_buffer(float32_t* block, uint32_t size)
 {
     uint8_t fill_idx = 1 - _dma_active_idx;
     while (_dma_busy && fill_idx == _dma_active_idx) { }
@@ -91,5 +91,5 @@ void UART_MDMA_send_buffer(float32_t* block)
     _pending_fill_idx = fill_idx;
     _mdma_busy        = 1;
     HAL_MDMA_Start_IT(&USART_MDMA_HANDLE, (uint32_t)block, (uint32_t)_d2_output[fill_idx],
-                      AUDIO_MIC_COUNT * OUTPUT_BUF_SIZE * sizeof(float32_t), 1);
+                      size, 1);
 }

@@ -5,6 +5,6 @@
 #include "audio_config.h"
 
 void spectrum_init(void);
-void spectrum_compute(const float32_t (*pcm)[AUDIO_SAMPLES_PER_BLOCK], float32_t (*spec)[SPECTRUM_FLOATS]);
+void spectrum_compute(float32_t* const frame[AUDIO_MIC_COUNT], const float32_t(**spec)[SPECTRUM_FLOATS]);
 
 #endif

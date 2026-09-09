@@ -1,4 +1,5 @@
 #include "app_entry.h"
+#include "audio_config.h"
 #include "console.h"
 #include "ics52000.h"
 
@@ -7,7 +8,7 @@
 
 void app_main(void)
 {
-    const float32_t(*pcm)[AUDIO_SAMPLES_PER_BLOCK];
+    float32_t* pcm[AUDIO_SAMPLES_PER_BLOCK];
     audio_format_t fmt = ics52000_format();
 
     console_init();
@@ -15,13 +16,13 @@ void app_main(void)
 
     while (1)
     {
-        if (ics52000_read(&pcm))
+        if (ics52000_read(pcm))
         {
             for (uint32_t i = 0; i < fmt.mic_count; ++i)
             {
                 float32_t sum_sq = 0.0f;
                 float32_t peak   = 0.0f;
-                for (uint32_t j = 0; j < fmt.samples_per_block; ++j)
+                for (uint32_t j = 0; j < ICS_FRAME_SAMPLES; ++j)
                 {
                     float32_t s  = pcm[i][j];
                     sum_sq      += s * s;

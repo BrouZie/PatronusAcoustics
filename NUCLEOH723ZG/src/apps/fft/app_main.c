@@ -4,11 +4,13 @@
 #include "ics52000.h"
 #include "spectrum.h"
 
-static float32_t spec[AUDIO_MIC_COUNT][SPECTRUM_FLOATS];
-
 void app_main(void)
 {
-    const float32_t(*pcm)[AUDIO_SAMPLES_PER_BLOCK];
+	// Array of pointers to audio frame
+	float32_t* frame[AUDIO_MIC_COUNT];
+
+	// Pointer to array containing spectrum samples
+	float32_t (*spectrum)[SPECTRUM_FLOATS];
 
     UART_DMA_start();
     spectrum_init();
@@ -16,10 +18,10 @@ void app_main(void)
 
     while (1)
     {
-        if (ics52000_read(&pcm))
+        if (ics52000_read(frame))
         {
-            spectrum_compute(pcm, spec);
-			UART_MDMA_send_buffer(&spec[0][0]);
+            spectrum_compute(frame, &spectrum);
+			UART_MDMA_send_buffer(*spectrum);
         }
     }
 }
