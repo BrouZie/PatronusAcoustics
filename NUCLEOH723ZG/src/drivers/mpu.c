@@ -1,4 +1,5 @@
 #include "mpu.h"
+#include <assert.h>
 
 // Smallest power-of-two region that covers the buffer, as an MPU size code
 static inline uint8_t _mpu_size(uint32_t bytes)
@@ -17,12 +18,14 @@ static inline uint8_t _mpu_size(uint32_t bytes)
  * data falls inside it. */
 void _mpu_configure(uint32_t* memory_address, uint32_t size_bytes)
 {
+	static uint8_t mpu_region_number = 0x00;
+
     MPU_Region_InitTypeDef r = { 0 };
 
     HAL_MPU_Disable();
 
     r.Enable           = MPU_REGION_ENABLE;
-    r.Number           = MPU_REGION_NUMBER0;
+    r.Number           = mpu_region_number;
     r.BaseAddress      = (uint32_t)memory_address;
     r.Size             = _mpu_size(size_bytes);
     r.SubRegionDisable = 0x0;
@@ -35,4 +38,5 @@ void _mpu_configure(uint32_t* memory_address, uint32_t size_bytes)
 
     HAL_MPU_ConfigRegion(&r);
     HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
+	++mpu_region_number;
 }
