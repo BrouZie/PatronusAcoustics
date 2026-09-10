@@ -10,6 +10,7 @@ From the repo root:
 
     uv run tools/spectrum_viewer.py
     uv run tools/logmel_viewer.py
+    uv run tools/srp_viewer.py
 
 The first run creates a `.venv` and installs the dependencies; afterwards it's
 incremental. Without `uv`, install `numpy`, `PyQt6`, `pyqtgraph`, and
@@ -59,6 +60,52 @@ Five pairs of low bands render as identical rows. That is the firmware, not the
 display: the mel spacing is finer than the FFT resolves down there, so the
 clamps in `src/dsp/log-mel_spectogram.c` collapse those pairs onto identical
 filters, and five of 64 bands carry nothing the band below does not.
+
+## srp_viewer.py
+
+Live SRP-PHAT map for the `srp-phat` app. The board sends a 64-byte header
+(`src/types/srp_packet.h`) and then the map, so the script configures its own
+axes and thresholds from the stream; only `PORT` and `BAUD` are local settings.
+
+When the firmware searches a single elevation row -- which is all a microphone
+pair can use -- the viewer draws a curve instead of a heatmap: power against
+the swept angle, peak in red, with the detection gate as a dashed line so a
+missed detection is visible rather than inferred.
+
+Elevation is the polar angle from boresight: 0 deg straight ahead, 90 deg in
+the plane of the array.
+
+### Reading it with two microphones
+
+A pair measures one thing: the angle between the source and the line through
+the two microphones. The grid in `src/config/array_geometry.h` is set to match,
+so azimuth carries that angle (0 and 180 endfire, 90 broadside) and elevation
+stays pinned at 90.
+
+- **Use a broadband source.** A pure tone gives a confident, repeatable, wrong
+  bearing -- delay is read from the slope of cross-phase against frequency, and
+  one frequency has no slope. Pink noise, a sustained "shhh", keys or crumpling
+  paper all work; a 1500 Hz tone measured 1.4 deg for a source truly at 40.
+- **Stay off the microphone axis.** Sensitivity is `0.24 * sin(angle)` samples
+  per degree, so broadside resolves about 12x better than endfire. Between 40
+  and 90 deg off the axis the error is 1-2 deg; below 30 deg the geometry
+  cannot resolve it at all.
+- **Distance barely matters.** The plane-wave model is off 1.6 deg at 15 cm and
+  0.1 deg at 50 cm.
+- **If nothing detects**, check the band first: flash the `fft` app and run
+  `spectrum_viewer.py`. Laptop and phone speakers roll off below ~400 Hz, which
+  is where a drone recording keeps its energy, so playback can leave almost
+  nothing in the 300-1700 Hz band however loud it sounds.
+
+The status line names which gate failed. `coherence` (0-1) says whether the
+microphones agree about a direction; `level` (dBFS, in-band) says whether there
+was anything worth pointing at. Both must pass. `SRP_DETECT_LEVEL_DB` in
+`src/dsp/srp-phat.h` is the one number that needs calibrating to your gain --
+watch the level in a quiet room and set it a few dB above that.
+
+The board sizes its own streaming rate to about 60% of the link: a 37x1 sweep
+goes out every frame, the full 72x19 grid every tenth. `BUILD=Debug` compiles
+-O0 and can make the DSP miss frames; use `BUILD=Release`.
 
 ## Adding a tool
 

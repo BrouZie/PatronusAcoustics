@@ -25,7 +25,7 @@ from pyqtgraph.Qt import QtCore
 # ---------------------------------------------------------------------------
 RATE = 48000     # AUDIO_SAMPLE_RATE_HZ
 FFT  = 1024      # SPECTRUM_FFT_SIZE
-MICS = 1         # AUDIO_MIC_COUNT
+MICS = 2         # AUDIO_MIC_COUNT
 PORT = "/dev/ttyACM0"
 BAUD = 921600
 

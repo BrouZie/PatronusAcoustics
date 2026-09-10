@@ -53,7 +53,6 @@ if(PATRONUS_BLOCK_SIZE)
     add_compile_definitions(AUDIO_SAMPLES_PER_BLOCK=${PATRONUS_BLOCK_SIZE})
 endif()
 
-
 # ----------------------------------------------------------------------------
 # CubeMX generated layer
 #

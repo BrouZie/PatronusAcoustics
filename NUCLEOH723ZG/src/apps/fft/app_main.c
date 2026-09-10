@@ -6,11 +6,11 @@
 
 void app_main(void)
 {
-	// Array of pointers to audio frame
-	float32_t* frame[AUDIO_MIC_COUNT];
+    // Array of pointers to audio frame
+    float32_t* frame[AUDIO_MIC_COUNT];
 
-	// Pointer to array containing spectrum samples
-	float32_t (*spectrum)[SPECTRUM_FLOATS];
+    // Pointer to array containing spectrum samples
+    const float32_t(*spectrum)[SPECTRUM_FLOATS];
 
     UART_DMA_start();
     spectrum_init();
@@ -21,7 +21,7 @@ void app_main(void)
         if (ics52000_read(frame))
         {
             spectrum_compute(frame, &spectrum);
-			UART_MDMA_send_buffer(*spectrum);
+            UART_MDMA_send_buffer((float32_t*)*spectrum, AUDIO_MIC_COUNT * SPECTRUM_FLOATS * sizeof(float32_t));
         }
     }
 }

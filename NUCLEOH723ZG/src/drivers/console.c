@@ -25,19 +25,33 @@
  * MDMA sends data from DTCM to RAM_D2, DMA sends data from RAM_D2 to USART
  */
 
-#define OUTPUT_RAM_BUF ".d2_buf" // -> RAM_D2
+#define OUTPUT_RAM_BUF  ".d2_buf" // -> RAM_D2
 #define OUTPUT_BUF_SIZE SPECTRUM_FLOATS
 
 #define USART_MDMA_HANDLE hmdma_mdma_channel1_sw_0
-#define USART_DMA_HANDLE hdma_usart3_tx
+#define USART_DMA_HANDLE  hdma_usart3_tx
 
 // Output buffer and flags
 static float32_t _d2_output[2][AUDIO_MIC_COUNT][OUTPUT_BUF_SIZE] __attribute__((section(OUTPUT_RAM_BUF), aligned(32)));
 
-static volatile uint8_t _dma_active_idx = 0;
-static volatile uint8_t _dma_busy       = 0;
-static volatile uint8_t _mdma_busy      = 0;
-static uint8_t _pending_fill_idx        = 0;
+_Static_assert(sizeof(_d2_output[0]) == CONSOLE_STAGING_BYTES,
+               "CONSOLE_STAGING_BYTES no longer describes a staging half of _d2_output");
+
+static volatile uint8_t _dma_active_idx   = 0;
+static volatile uint8_t _dma_busy         = 0;
+static volatile uint8_t _mdma_busy        = 0;
+static uint8_t          _pending_fill_idx = 0;
+
+/* Byte count of the transfer the MDMA is staging, handed to the UART DMA when
+ * it lands. Payloads are not all the same size -- an SRP map is not an FFT
+ * frame -- so the length cannot be a compile-time constant. */
+static volatile uint32_t _pending_bytes = 0;
+
+// Payloads too large for a staging half are refused rather than overrunning it.
+static volatile uint32_t _oversized_drops = 0;
+
+// Bad-length refusals plus hardware-reported MDMA/DMA transfer errors.
+static volatile uint32_t _tx_errors = 0;
 
 /* --------- Init  --------- */
 
@@ -65,12 +79,30 @@ void DMA_transfer_complete(DMA_HandleTypeDef* hdma)
 void MDMA_transfer_complete(MDMA_HandleTypeDef* hmdma)
 {
     (void)hmdma;
-    _mdma_busy = 0;
-    _dma_active_idx = _pending_fill_idx;
-    _dma_busy       = 1;
+    _mdma_busy            = 0;
+    _dma_active_idx       = _pending_fill_idx;
+    _dma_busy             = 1;
     huart3.Instance->CR3 |= USART_CR3_DMAT;
     HAL_DMA_Start_IT(&USART_DMA_HANDLE, (uint32_t)_d2_output[_dma_active_idx], (uint32_t)&huart3.Instance->TDR,
-                     AUDIO_MIC_COUNT * OUTPUT_BUF_SIZE * sizeof(float32_t));
+                     _pending_bytes);
+}
+
+/* A failed transfer never reaches MDMA_transfer_complete, so without these the
+ * busy flags stay set and the next UART_MDMA_send_buffer() spins forever. A
+ * lost packet is recoverable; a deadlocked capture loop is not. */
+void MDMA_transfer_error(MDMA_HandleTypeDef* hmdma)
+{
+    (void)hmdma;
+    _mdma_busy = 0;
+    _tx_errors++;
+}
+
+void DMA_transfer_error(DMA_HandleTypeDef* hdma)
+{
+    (void)hdma;
+    huart3.Instance->CR3 &= ~USART_CR3_DMAT;
+    _dma_busy = 0;
+    _tx_errors++;
 }
 
 /* --------- DMA & MDMA --------- */
@@ -79,17 +111,60 @@ void UART_DMA_start(void)
 {
     _mpu_configure((uint32_t*)&_d2_output, sizeof(_d2_output));
     console_init();
+
+    /* CubeMX generates this stream as DMA_CIRCULAR (Core/Src/usart.c). Imposed
+     * here, the same way ics52000.c imposes the SAI format on what the .ioc
+     * last generated.
+     *
+     * In circular mode HAL_DMA_IRQHandler restores neither State nor the
+     * __HAL_LOCK on transfer-complete (stm32h7xx_hal_dma.c), so every
+     * HAL_DMA_Start_IT after the first returns HAL_BUSY without reprogramming
+     * anything: exactly one buffer would ever leave the board. */
+    USART_DMA_HANDLE.Init.Mode = DMA_NORMAL;
+    if (HAL_DMA_Init(&USART_DMA_HANDLE) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
     HAL_DMA_RegisterCallback(&USART_DMA_HANDLE, HAL_DMA_XFER_CPLT_CB_ID, &DMA_transfer_complete);
+    HAL_DMA_RegisterCallback(&USART_DMA_HANDLE, HAL_DMA_XFER_ERROR_CB_ID, &DMA_transfer_error);
     HAL_MDMA_RegisterCallback(&USART_MDMA_HANDLE, HAL_MDMA_XFER_CPLT_CB_ID, &MDMA_transfer_complete);
+    HAL_MDMA_RegisterCallback(&USART_MDMA_HANDLE, HAL_MDMA_XFER_ERROR_CB_ID, &MDMA_transfer_error);
 }
+
+uint32_t console_oversized_drops(void) { return _oversized_drops; }
+
+uint32_t console_tx_errors(void) { return _tx_errors; }
 
 void UART_MDMA_send_buffer(float32_t* block, uint32_t size)
 {
+    /* The MDMA would happily write past the end of a staging half and into
+     * whatever RAM_D2 holds next. Drop instead, and keep a count so the caller
+     * can be found rather than the corruption chased. */
+    if (size > CONSOLE_STAGING_BYTES)
+    {
+        _oversized_drops++;
+        return;
+    }
+
+    /* A misaligned length raises MDMA_CESR_BSE and the transfer never
+     * completes. Refuse it here, where the caller can be identified, rather
+     * than discover it as a stream that silently stops. */
+    if ((size % CONSOLE_TX_ALIGN_BYTES) != 0U)
+    {
+        _tx_errors++;
+        return;
+    }
+
     uint8_t fill_idx = 1 - _dma_active_idx;
-    while (_dma_busy && fill_idx == _dma_active_idx) { }
-    while (_mdma_busy) { }
+    while (_dma_busy && fill_idx == _dma_active_idx)
+    {
+    }
+    while (_mdma_busy)
+    {
+    }
     _pending_fill_idx = fill_idx;
+    _pending_bytes    = size;
     _mdma_busy        = 1;
-    HAL_MDMA_Start_IT(&USART_MDMA_HANDLE, (uint32_t)block, (uint32_t)_d2_output[fill_idx],
-                      size, 1);
+    HAL_MDMA_Start_IT(&USART_MDMA_HANDLE, (uint32_t)block, (uint32_t)_d2_output[fill_idx], size, 1);
 }

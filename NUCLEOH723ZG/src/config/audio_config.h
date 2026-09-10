@@ -20,8 +20,10 @@
 
 // --------- Tunables ---------
 
+/* Must match the position table selected in array_geometry.h. Two is the
+ * station's current build: a single pair on a line. */
 #ifndef AUDIO_MIC_COUNT
-#define AUDIO_MIC_COUNT 1
+#define AUDIO_MIC_COUNT 2
 #endif
 
 #ifndef AUDIO_SAMPLE_RATE_HZ
@@ -52,7 +54,7 @@
 #define AUDIO_BLOCK_SAMPLES (AUDIO_SAMPLES_PER_BLOCK * AUDIO_MIC_COUNT)
 
 /* One landed _dtcm_block half = one hop. Output frames are 2 hops: 50% overlap. */
-#define ICS_HOP_SAMPLES AUDIO_SAMPLES_PER_BLOCK
+#define ICS_HOP_SAMPLES   AUDIO_SAMPLES_PER_BLOCK
 #define ICS_FRAME_SAMPLES (2 * ICS_HOP_SAMPLES)
 
 // Fast Fourier Tranform buffer
