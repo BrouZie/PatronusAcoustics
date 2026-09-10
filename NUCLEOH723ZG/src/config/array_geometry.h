@@ -16,26 +16,21 @@
 //
 // LEAF HEADER: no HAL, no function declarations, no module headers.
 //
-// Each block also declares the SEARCH GRID and FREQUENCY BAND that geometry
-// can actually support, because both follow from the layout and nothing else:
+// Each block also declares the SEARCH GRID and FREQUENCY BAND that geometry can
+// support, because both follow from the layout and nothing else:
 //
-//   ARRAY_SEARCH_* -- how many directions are worth distinguishing. An array
-//                     can only resolve as many angles as its aperture spans
+//   ARRAY_SEARCH_* -- an array resolves as many angles as its aperture spans
 //                     dimensions. A LINE spans one, so it fixes elevation and
-//                     sweeps a single angle; a PLANE spans two, so it sweeps
-//                     azimuth and elevation both. Searching more angles than
-//                     the geometry supports does not add information -- it
-//                     just spreads one answer over many equally-good cells and
-//                     makes the reported bearing wander between them.
+//                     sweeps a single angle; a PLANE spans two. Searching more
+//                     angles than the geometry supports adds no information, it
+//                     just spreads one answer over equally-good cells and lets
+//                     the reported bearing wander between them.
 //
-//   ARRAY_BAND_*   -- two microphones d metres apart cannot tell a wavefront
-//                     from its alias above f_alias = c / (2 * d), c = 343 m/s,
-//                     where d is the SMALLEST spacing in the array. Above that
-//                     the map grows mirror peaks indistinguishable from the
-//                     true one, so the band's upper edge is set below it.
+//   ARRAY_BAND_*   -- two mics d apart cannot tell a wavefront from its alias
+//                     above c / (2 * d), d being the SMALLEST spacing, so the
+//                     band's upper edge is set below that.
 //
-// Adding a geometry means adding all three together, which is what keeps them
-// from drifting apart.
+// Adding a geometry means adding all three together.
 // ============================================================================
 
 #include "audio_config.h"

@@ -1,49 +1,29 @@
 #include "srp-phat.h"
 
-#include "array_geometry.h"
-#include "audio_config.h"
-
 #include <math.h>
 
 /*
- * The formula in srp-phat.h asks for a phase term e^(+j 2pi k tau_m / N) at
- * every (bin, mic, direction). Tabulating those is what a desktop
- * implementation does -- py-simulation precomputes exactly that tensor -- and
- * it is also what makes SRP-PHAT look like it cannot fit on a microcontroller:
- * 26 bins x 8 mics x 1368 directions is 1.6 MB of complex floats.
+ * The formula in srp-phat.h wants a phase term at every (bin, mic, direction).
+ * Tabulating those is what a desktop implementation does, and it is what makes
+ * SRP-PHAT look too big for a microcontroller: 26 bins x 8 mics x 1368
+ * directions is 1.6 MB of complex floats. Two observations remove the table
+ * without approximating anything:
  *
- * Two observations remove the table entirely, without approximating anything:
+ *   1. Across bins the phase is a geometric sequence -- e^(+j 2pi k tau / N) is
+ *      w^k -- so the band is walked with one complex multiply per bin.
+ *   2. tau is a 3-term dot product, cheaper to recompute than to store.
  *
- *   1. Across bins, the phase is a geometric sequence. For a fixed mic and
- *      direction, e^(+j 2pi k tau / N) is just w^k with w = e^(+j 2pi tau / N).
- *      So the band is walked with ONE complex multiply per bin, seeded once.
- *
- *   2. tau itself is a 3-term dot product. Cheaper to recompute than to store,
- *      and it means memory here is O(directions + mics) rather than
- *      O(directions x mics x bins) -- the array can grow without the buffers
- *      growing with it.
- *
- * What is left costs directions x bins x mics complex multiply-accumulates per
- * frame, plus four table-based sin/cos per (direction, mic) to seed the
- * recursion. That is the honest price of SRP-PHAT and it is the thing that
- * will eventually bind. Estimated at 550 MHz, optimised: ~1.8 ms at 2 mics and
- * ~7 ms at 8, against the 10.7 ms a 512-sample hop leaves.
- *
- * Two warnings about that figure. It is an estimate -- measure it with the DWT
- * cycle counter before trusting it. And the default build type is Debug, which
- * compiles -O0: expect several times the above, quite possibly more than the
- * frame period. Use BUILD=Release for anything timing-sensitive, and watch
- * ics52000_stats()->missed for the truth.
+ * Memory is then O(directions + mics) instead of O(directions x mics x bins).
+ * What remains costs directions x bins x mics complex MACs per frame, plus four
+ * table sin/cos per (direction, mic) to seed the recursion: roughly 1.8 ms at
+ * 2 mics and 7 ms at 8, against the 10.7 ms a 512-sample hop leaves. Those are
+ * estimates at 550 MHz optimised -- Debug builds -O0 and can miss frames, so
+ * watch ics52000_stats()->missed.
  */
-
-/* --------- LINKER BINDINGS --------- */
 
 #define SRP_DTCM_BUF ".dtcm_buf"
 
-/* --------- CONSTANTS --------- */
-
-/* Magnitude floor for the PHAT division, so a silent bin yields 0 instead of a
- * NaN. Matches py-simulation/src/constants.py:EPS_NORM. */
+// Magnitude floor for the PHAT division, so a silent bin yields 0 and not NaN
 #define SRP_EPS 1.0e-10f
 
 #define SRP_DEG_TO_RAD (PI / 180.0f)
@@ -69,13 +49,10 @@ static bool      _averaged_primed;
 
 /* --------- DIFFUSE-FIELD FLOOR --------- */
 
-/* In a diffuse (reverberant) field two omnidirectional microphones d apart are
- * correlated by sinc(2*pi*f*d/c) with no source present at all. Averaged over
- * the band and over every pair, that is exactly what the coherence metric
- * reads for an empty room -- the number the detector has to beat.
- *
- * Computed once, from the geometry actually built, so it stays right when the
- * array changes instead of being a constant that silently goes stale. */
+/* In a diffuse field two omnis d apart correlate as sinc(2*pi*f*d/c) with no
+ * source present. Averaged over the band and over every pair, that is what the
+ * coherence metric reads for an empty room: the number the detector must beat.
+ * Computed from the geometry actually built, so it cannot go stale. */
 static float32_t _coherence_floor;
 
 static void _coherence_floor_init(void)
@@ -123,15 +100,10 @@ static float32_t _band_level_db(const float32_t (*spec)[SPECTRUM_FLOATS])
         power += spec[0][2 * k] * spec[0][2 * k] + spec[0][2 * k + 1] * spec[0][2 * k + 1];
     }
 
-    /* Convert the windowed one-sided spectrum back to a time-domain mean square
-     * and reference it to a full-scale sine, so 0 dB really is 0 dBFS:
-     *
-     *   2 / N^2          one-sided spectrum -> mean square
-     *   / (3/8)          undo the periodic Hann power gain, mean(w^2)
-     *   * 2              reference to a sine (mean square 1/2), not to 1.0
-     *
-     * The 3/8 ties this to the window spectrum.c applies; the two move together.
-     * Verified: a full-scale sine reads 0.0, a 0.1 amplitude sine reads -20.0. */
+    /* Windowed one-sided spectrum -> time-domain mean square, referenced to a
+     * full-scale sine so 0 dB is 0 dBFS:  2/N^2, then /(3/8) for the periodic
+     * Hann power gain, then *2 for the sine reference. The 3/8 ties this to the
+     * window spectrum.c applies. */
     const float32_t scale = 4.0f / ((float32_t)SPECTRUM_FFT_SIZE * (float32_t)SPECTRUM_FFT_SIZE * 0.375f);
 
     return 10.0f * log10f(power * scale + SRP_EPS);
@@ -147,11 +119,7 @@ static void _whiten(const float32_t (*spec)[SPECTRUM_FLOATS])
             const float32_t re = spec[ch][2 * k];
             const float32_t im = spec[ch][2 * k + 1];
 
-            /* Divide each bin by its own magnitude: what survives is a unit
-             * complex number carrying only the arrival phase. A jet engine and
-             * a whisper at the same frequency now count the same, which is the
-             * whole point -- the peak is decided by agreement across mics, not
-             * by loudness. */
+            // Only the arrival phase survives; loudness is deliberately discarded
             const float32_t scale = 1.0f / (sqrtf(re * re + im * im) + SRP_EPS);
 
             _whitened[ch][b][0] = re * scale;
@@ -182,9 +150,8 @@ static float32_t _steer(float32_t ux, float32_t uy, float32_t uz)
         const float32_t tau =
             -(pos[0] * ux + pos[1] * uy + pos[2] * uz) / SRP_SPEED_OF_SOUND * (float32_t)AUDIO_SAMPLE_RATE_HZ;
 
-        /* Undoing that delay is a phase advance of 2*pi*tau/N per bin index.
-         * arm_sin/cos_f32 are table lookups: exact enough at 1e-7, and cheap
-         * enough to afford once per (direction, mic). */
+        // Undoing that delay is a phase advance of 2*pi*tau/N per bin index
+
         const float32_t per_bin = 2.0f * PI * tau / (float32_t)SPECTRUM_FFT_SIZE;
 
         step_re[ch] = arm_cos_f32(per_bin);
@@ -208,9 +175,7 @@ static float32_t _steer(float32_t ux, float32_t uy, float32_t uz)
             const float32_t xr = _whitened[ch][b][0];
             const float32_t xi = _whitened[ch][b][1];
 
-            /* Rotate this mic into alignment with the array origin and add it
-             * to the beam. Mics that agree about this direction add up; mics
-             * that do not, cancel. */
+            // Mics that agree about this direction add up; the rest cancel
             beam_re += xr * rot_re[ch] - xi * rot_im[ch];
             beam_im += xr * rot_im[ch] + xi * rot_re[ch];
 
@@ -258,6 +223,10 @@ void srp_phat_compute(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* map_o
 
     _whiten(spec);
 
+    /* Blend weight for the running average. The first frame has no history, so
+     * it seeds the map outright at weight 1 instead of ramping up from zero. */
+    const float32_t blend = _averaged_primed ? 1.0f / (float32_t)SRP_AVERAGE_FRAMES : 1.0f;
+
     float32_t peak    = -1.0f;
     uint32_t  peak_az = 0;
     uint32_t  peak_el = 0;
@@ -272,17 +241,10 @@ void srp_phat_compute(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* map_o
             const float32_t uy = _sin_el[e] * _sin_az[a];
             const float32_t uz = _cos_el[e];
 
-            const uint32_t  d     = a * SRP_EL_STEPS + e;
-            const float32_t power = _steer(ux, uy, uz);
+            const uint32_t d = a * SRP_EL_STEPS + e;
 
-            /* Blend this frame into the running map. The first frame has no
-             * history to blend with, so it seeds the average outright --
-             * otherwise the map would ramp up from zero over SRP_AVERAGE_FRAMES
-             * frames and the early bearings would be meaningless. */
-            _averaged[d] =
-                _averaged_primed ? _averaged[d] + (power - _averaged[d]) / (float32_t)SRP_AVERAGE_FRAMES : power;
-
-            map_out[d] = _averaged[d];
+            _averaged[d] += (_steer(ux, uy, uz) - _averaged[d]) * blend;
+            map_out[d]    = _averaged[d];
 
             if (_averaged[d] > peak)
             {
@@ -293,44 +255,24 @@ void srp_phat_compute(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* map_o
         }
     }
 
-    /* At el = 0 every azimuth names the same direction (straight ahead), so
-     * that row of the map is 72 copies of one value. The strict > above breaks
-     * the tie toward azimuth 0, which is as meaningful as any other. */
-
     _averaged_primed = true;
 
     doa->azimuth_deg   = SRP_AZ_START_DEG + (float32_t)peak_az * SRP_AZ_STEP_DEG;
     doa->elevation_deg = SRP_EL_START_DEG + (float32_t)peak_el * SRP_EL_STEP_DEG;
-    doa->peak_power    = peak;
 
-    /* How far the peak stands above the map's own floor. A real source makes
-     * one direction much better than average; noise alone does not. The inner
-     * epsilon keeps a fully silent frame at a finite -100 dB. */
-    /* Where the peak sits between the diffuse-noise floor and the perfectly
-     * coherent ceiling that PHAT normalisation pins the map to. */
+    /* Where the peak sits between the incoherent floor and the perfectly
+     * coherent ceiling that PHAT normalisation pins the map to. One microphone
+     * has nothing to agree with, so that span collapses to zero. */
     const float32_t incoherent = (float32_t)AUDIO_MIC_COUNT * (float32_t)SRP_BAND_BINS;
     const float32_t coherent   = (float32_t)AUDIO_MIC_COUNT * incoherent;
-
-    /* One microphone has nothing to agree with, so its map carries no
-     * direction information and the span below collapses to zero. */
-    float32_t coherence = (coherent > incoherent) ? (peak - incoherent) / (coherent - incoherent) : 0.0f;
-
-    if (coherence < 0.0f)
-    {
-        coherence = 0.0f;
-    }
-    if (coherence > 1.0f)
-    {
-        coherence = 1.0f;
-    }
+    const float32_t raw        = (coherent > incoherent) ? (peak - incoherent) / (coherent - incoherent) : 0.0f;
+    const float32_t coherence  = (raw < 0.0f) ? 0.0f : (raw > 1.0f) ? 1.0f : raw;
 
     doa->coherence       = coherence;
     doa->coherence_floor = _coherence_floor;
 
-    /* Both gates, answering different questions: coherence says the bearing is
-     * trustworthy, level says there is something worth reporting a bearing
-     * about. Coherence is judged against what an empty room already produces,
-     * not against zero. */
-    doa->detected =
-        (coherence >= _coherence_floor + SRP_DETECT_MARGIN) && (doa->level_db >= SRP_DETECT_LEVEL_DB);
+    /* Coherence says the bearing is trustworthy, level says there is something
+     * worth reporting a bearing about. Coherence is judged against what an
+     * empty room already produces, not against zero. */
+    doa->detected = (coherence >= _coherence_floor + SRP_DETECT_MARGIN) && (doa->level_db >= SRP_DETECT_LEVEL_DB);
 }
