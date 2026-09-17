@@ -14,7 +14,9 @@
 */
 
 #define NUM_FRAMES    94
-#define NUM_MEL_BANDS 64     
+#define NUM_MEL_BANDS 64
+#define MIN_FREQUENCY        100
+#define MAX_FREQUENCY        6000
 
 void mel_filterbank_init(void);
 void get_logmel_frame(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* mel_out);

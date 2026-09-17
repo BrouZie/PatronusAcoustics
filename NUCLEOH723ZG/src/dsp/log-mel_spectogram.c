@@ -1,10 +1,9 @@
 #include "log-mel_spectogram.h"
+#include "arm_math.h"
 #include "audio_config.h"
 
 #include <stdint.h>
 
-#define MIN_FREQUENCY        100
-#define MAX_FREQUENCY        6000
 #define EPSILON              1.0e-6f
 #define MEL_WEIGHT_POOL_SIZE 384U   /* Size to sum(num_bins) across all bands */
 
