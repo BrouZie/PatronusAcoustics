@@ -1,29 +1,37 @@
-"""Live log-mel spectrogram viewer for the NUCLEO-H723ZG `log-mel` app.
+"""Live log-mel spectrogram viewer for the NUCLEO-H723ZG `log-mel` app
+CNN-pipeline variant.
 
-The board sends one packet per image: a 32-byte header (src/types/logmel_packet.h)
-followed by frames x bands cells, one byte each. The reader syncs on the header's
-magic word and takes its geometry, scaling and axis labels from the header, so
-PORT and BAUD below are the only things that must match the board.
+Geometry, rate, and quantization are fixed by the trained model, so they're
+compile-time constants here (mirrored in firmware) rather than fields on the
+wire. The packet header is now just a magic word (sync + format-version
+guard) and a sequence number (drop detection):
 
-An image is a second of audio delivered in a ~66 ms burst, so columns are queued
-and drawn at the rate they were captured: the picture scrolls smoothly, one image
-behind the board, instead of lurching once a second.
+    struct __attribute__((packed)) {
+        uint32_t magic;   // must be LOGMEL_MAGIC
+        uint32_t seq;     // increments every image; used to detect drops
+    };                    // 8 bytes
 
-    uv run tools/logmel_viewer.py
+Bump MAGIC whenever FRAMES/BANDS/RATE/HOP/FFT/quant range change, so a stale
+binary can never feed the CNN a shape it wasn't trained on.
+
+An image is a second of audio delivered in a ~66 ms burst, so columns are
+queued and drawn at the rate they were captured: the picture scrolls
+smoothly, one image behind the board, instead of lurching once a second.
+
+    uv run tools/logmel_viewer_cnn.py
 """
 
 import signal
 import struct
 import sys
-from collections import deque, namedtuple
+from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
 import serial
 from pyqtgraph.Qt import QtCore
 
-# --- Config. Only the serial device and display preferences; the wire format
-# --- describes itself.
+# --- Config: serial device and display preferences.
 PORT = "/dev/ttyACM0"
 BAUD = 921600
 
@@ -33,12 +41,26 @@ LEVELS = (-6.0, 4.0)
 TICK_MS = 20
 IDLE_TICKS = 150            # warn after ~3 s with no packet
 
+# --- Fixed by the trained model. Must match src/dsp/log-mel_spectogram.c and
+# --- whatever produced the training set exactly, or the CNN sees a shape or
+# --- scale it was never trained on. Bump MAGIC if any of these change.
+FRAMES = 94                 # rows in the image (time)
+BANDS = 64                   # columns in the image (mel bands)
+RATE = 48000                 # sample rate, Hz
+HOP = 512                    # hop size in samples between frames
+MIN_FREQ = 100                # Hz
+MAX_FREQ = 6000              # Hz
+FFT = 1024                    # FFT size used
+Q_SCALE = 2.83               # dequant: db = byte / Q_SCALE + Q_OFFSET
+Q_OFFSET = -80.0
+
+# These values needs to match with the ones in STM32
+
 MAGIC = 0x4C454D4C
 MAGIC_BYTES = struct.pack("<I", MAGIC)
-HDR = struct.Struct("<IIHHIHHHHff")          # magic, then the fields below
-HDR_SIZE = HDR.size                          # 32
-Header = namedtuple("Header", "seq frames bands rate hop min_freq max_freq fft "
-                              "q_scale q_offset")
+HDR = struct.Struct("<II")             # magic, seq
+HDR_SIZE = HDR.size                    # 8
+PACKET_SIZE = HDR_SIZE + FRAMES * BANDS
 
 port = None
 buf = bytearray()
@@ -46,28 +68,13 @@ pending = deque()               # columns waiting to be drawn
 img = img_rect = centers = None
 cols_per_tick = 1.0
 credit = 0.0                    # fractional columns owed to the display
-frames_per_image = 1
-configured = False
-last_seq = None
 idle_ticks = nbytes = nimages = ndropped = 0
+last_seq = None
 sample_bytes = bytearray()      # first bytes seen, for the no-header diagnostic
 
 
-def parse_header(raw):
-    """Validated header at the front of `raw`, or None. The bounds matter: a
-    false magic match would have to carry a plausible geometry too."""
-    magic, *fields = HDR.unpack_from(raw)
-    h = Header(*fields)
-    ok = (magic == MAGIC
-          and 0 < h.frames <= 4096 and 0 < h.bands <= 512
-          and 1000 <= h.rate <= 384000 and h.hop > 0 and h.fft > 0
-          and h.q_scale > 0.0 and np.isfinite(h.q_scale) and np.isfinite(h.q_offset)
-          and 0 <= h.min_freq < h.max_freq <= h.rate // 2)
-    return h if ok else None
-
-
 def find_packet():
-    """(header, image) of the next complete buffered packet, or None. Sheds
+    """(seq, image) of the next complete buffered packet, or None. Sheds
     bytes ahead of the first plausible magic so junk cannot accumulate."""
     start = 0
     while True:
@@ -79,22 +86,21 @@ def find_packet():
         del buf[:at]
         if len(buf) < HDR_SIZE:
             return None
-        h = parse_header(buf)
-        if h is None:
+        magic, seq = HDR.unpack_from(buf)
+        if magic != MAGIC:
             start = len(MAGIC_BYTES)         # false match, look past it
             continue
-        size = HDR_SIZE + h.frames * h.bands
-        if len(buf) < size:
+        if len(buf) < PACKET_SIZE:
             return None
         # bytes() first: a frombuffer view would keep the bytearray exported
         # and block the del below.
-        cells = np.frombuffer(bytes(buf[HDR_SIZE:size]), np.uint8)
-        del buf[:size]
-        image = cells.reshape(h.frames, h.bands).astype(np.float32)
-        return h, image / h.q_scale + h.q_offset
+        cells = np.frombuffer(bytes(buf[HDR_SIZE:PACKET_SIZE]), np.uint8)
+        del buf[:PACKET_SIZE]
+        image = cells.reshape(FRAMES, BANDS).astype(np.float32)
+        return seq, image / Q_SCALE + Q_OFFSET
 
 
-def mel_centers_hz(h):
+def mel_centers_hz():
     """Band centre frequencies, mirroring mel_filterbank_init() in
     src/dsp/log-mel_spectogram.c. float32 throughout, to land on the same side
     of floorf() as the firmware. Only the firmware's centre clamp matters here;
@@ -102,40 +108,40 @@ def mel_centers_hz(h):
     f = np.float32
     to_mel = lambda hz: f(2595) * np.log10(f(1) + f(hz) / f(700))
 
-    lo, hi = to_mel(h.min_freq), to_mel(h.max_freq)
-    step = (hi - lo) / f(h.bands + 1)
-    spacing = f(h.rate) / f(h.fft)
-    mels = lo + np.arange(h.bands + 2, dtype=f) * step
+    lo, hi = to_mel(MIN_FREQ), to_mel(MAX_FREQ)
+    step = (hi - lo) / f(BANDS + 1)
+    spacing = f(RATE) / f(FFT)
+    mels = lo + np.arange(BANDS + 2, dtype=f) * step
     bins = np.floor((f(700) * (f(10.0) ** (mels / f(2595)) - f(1))) / spacing).astype(int)
 
-    return np.maximum(bins[1:h.bands + 1], bins[:h.bands] + 1) * float(spacing)
+    return np.maximum(bins[1:BANDS + 1], bins[:BANDS] + 1) * float(spacing)
 
 
-def configure(h):
-    """First packet decides the geometry: size the view and label the axes."""
-    global img, img_rect, centers, cols_per_tick, configured
+def configure():
+    """Geometry is fixed by the model, so the view can be sized before the
+    first packet ever arrives."""
+    global img, img_rect, centers, cols_per_tick
 
-    centers = mel_centers_hz(h)
-    per_s = h.rate / h.hop
+    centers = mel_centers_hz()
+    per_s = RATE / HOP
     cols_per_tick = per_s * TICK_MS / 1000.0
-    img = np.full((max(h.frames, int(SECONDS_SHOWN * per_s)), h.bands),
-                  h.q_offset, dtype=np.float32)
-    img_rect = QtCore.QRectF(0, 0, SECONDS_SHOWN, h.bands)
+    img = np.full((max(FRAMES, int(SECONDS_SHOWN * per_s)), BANDS),
+                  Q_OFFSET, dtype=np.float32)
+    img_rect = QtCore.QRectF(0, 0, SECONDS_SHOWN, BANDS)
 
     plot.setXRange(0, SECONDS_SHOWN, padding=0)
-    plot.setYRange(0, h.bands, padding=0)
-    stride = max(1, h.bands // 10)
+    plot.setYRange(0, BANDS, padding=0)
+    stride = max(1, BANDS // 10)
     plot.getAxis("left").setTicks(
-        [[(b + 0.5, f"{centers[b]:.0f}") for b in range(0, h.bands, stride)]])
-    plot.setTitle(f"log-mel {h.frames} x {h.bands} | {h.rate} Hz, hop {h.hop} "
-                  f"({per_s:.1f} col/s) | {h.min_freq}-{h.max_freq} Hz | "
-                  f"{10.0 / h.q_scale:.2f} dB/step")
-    configured = True
+        [[(b + 0.5, f"{centers[b]:.0f}") for b in range(0, BANDS, stride)]])
+    plot.setTitle(f"log-mel {FRAMES} x {BANDS} | {RATE} Hz, hop {HOP} "
+                  f"({per_s:.1f} col/s) | {MIN_FREQ}-{MAX_FREQ} Hz | "
+                  f"{10.0 / Q_SCALE:.2f} dB/step")
 
-    size, secs = HDR_SIZE + h.frames * h.bands, h.frames * h.hop / h.rate
-    print(f"{h.frames} x {h.bands} image every {secs:.2f} s ({per_s:.2f} col/s); "
-          f"packet {size} B = {size * 10 / BAUD * 1e3:.0f} ms on the wire, "
-          f"{size * 10 / secs / BAUD * 100:.1f}% of the link")
+    secs = FRAMES * HOP / RATE
+    print(f"{FRAMES} x {BANDS} image every {secs:.2f} s ({per_s:.2f} col/s); "
+          f"packet {PACKET_SIZE} B = {PACKET_SIZE * 10 / BAUD * 1e3:.0f} ms on the wire, "
+          f"{PACKET_SIZE * 10 / secs / BAUD * 100:.1f}% of the link")
 
 
 def redraw():
@@ -145,7 +151,7 @@ def redraw():
 
     if pending:
         # Catch up rather than fall further behind if the queue is running long.
-        credit += cols_per_tick * (2 if len(pending) > 2 * frames_per_image else 1)
+        credit += cols_per_tick * (2 if len(pending) > 2 * FRAMES else 1)
         n = int(credit)
         if n > 0:
             credit -= n
@@ -153,8 +159,6 @@ def redraw():
             img = np.roll(img, -n, axis=0)
             img[-n:] = [pending.popleft() for _ in range(n)]
 
-    if img is None:
-        return
     if AUTO_LEVELS:
         lo, hi = np.percentile(img, (2.0, 99.8))
         levels = (float(lo), float(max(hi, lo + 0.5)))
@@ -168,12 +172,11 @@ def redraw():
 
 def status():
     if idle_ticks < IDLE_TICKS:
-        if configured:
-            peak = int(np.argmax(img[-1]))
-            drop = f"  dropped {ndropped}" if ndropped else ""
-            label.setText(f"images {nimages}{drop} | seq {last_seq} | "
-                          f"queue {len(pending)} | peak band {peak} "
-                          f"({centers[peak]:.0f} Hz)")
+        peak = int(np.argmax(img[-1]))
+        drop = f"  dropped {ndropped}" if ndropped else ""
+        label.setText(f"images {nimages}{drop} | seq {last_seq} | "
+                      f"queue {len(pending)} | peak band {peak} "
+                      f"({centers[peak]:.0f} Hz)")
         return
     # Say which half of the link is at fault: silence is a port/flash problem,
     # bytes without a header is a format problem on the board.
@@ -182,12 +185,13 @@ def status():
                       "is the log-mel app the one flashed, and is this the right device?")
     else:
         label.setText(f"{nbytes} bytes arriving but no valid header - expected magic "
-                      f"{MAGIC_BYTES.hex(' ')} ('LMEL'). "
+                      f"{MAGIC_BYTES.hex(' ')} ('LMEL'). If the board's geometry/rate/quant "
+                      f"were retrained, bump MAGIC here to match. "
                       f"First bytes: {sample_bytes.hex(' ')}")
 
 
 def poll():
-    global idle_ticks, nbytes, nimages, ndropped, last_seq, frames_per_image
+    global idle_ticks, nbytes, nimages, ndropped, last_seq
 
     chunk = port.read(port.in_waiting or 1)
     nbytes += len(chunk)
@@ -196,13 +200,10 @@ def poll():
 
     got = 0
     while (packet := find_packet()) is not None:
-        h, image = packet
-        if not configured:
-            configure(h)
-        frames_per_image = h.frames
+        seq, image = packet
         if last_seq is not None:
-            ndropped += h.seq - last_seq - 1
-        last_seq = h.seq
+            ndropped += seq - last_seq - 1
+        last_seq = seq
         nimages += 1
         pending.extend(image)
         got += 1
@@ -228,7 +229,7 @@ def main():
     win.resize(1400, 800)
     win.show()
 
-    plot = win.addPlot(row=0, col=0, title="waiting for a packet...")
+    plot = win.addPlot(row=0, col=0, title="log-mel")
     img_item = pg.ImageItem()
     # A viridis-ish ramp, spelled out so the tool needs no matplotlib.
     cmap = pg.ColorMap(pos=[0.0, 0.25, 0.5, 0.75, 1.0],
@@ -242,6 +243,9 @@ def main():
     label = pg.LabelItem(justify="left")
     win.addItem(label, row=1, col=0)
     win.ci.layout.setRowStretchFactor(0, 1)   # image takes the window
+
+    # Geometry is fixed, so the view can be built before any packet arrives.
+    configure()
 
     timer = QtCore.QTimer()
     timer.timeout.connect(poll)
