@@ -44,12 +44,12 @@ IDLE_TICKS = 150            # warn after ~3 s with no packet
 # --- Fixed by the trained model. Must match src/dsp/log-mel_spectogram.c and
 # --- whatever produced the training set exactly, or the CNN sees a shape or
 # --- scale it was never trained on. Bump MAGIC if any of these change.
-FRAMES = 94                 # rows in the image (time)
-BANDS = 64                   # columns in the image (mel bands)
+FRAMES = 62                # rows in the image (time)
+BANDS = 128                   # columns in the image (mel bands)
 RATE = 48000                 # sample rate, Hz
 HOP = 512                    # hop size in samples between frames
 MIN_FREQ = 100                # Hz
-MAX_FREQ = 6000              # Hz
+MAX_FREQ = 8000              # Hz
 FFT = 1024                    # FFT size used
 Q_SCALE = 2.83               # dequant: db = byte / Q_SCALE + Q_OFFSET
 Q_OFFSET = -80.0

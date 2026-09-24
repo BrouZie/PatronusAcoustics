@@ -1,11 +1,21 @@
 #include "log-mel_spectogram.h"
 #include "arm_math.h"
-#include "audio_config.h"
 
 #include <stdint.h>
 
-#define EPSILON              1.0e-6f
-#define MEL_WEIGHT_POOL_SIZE 384U   /* Size to sum(num_bins) across all bands */
+#define EPSILON              1.0e-6f 
+#define MEL_WEIGHT_POOL_SIZE 1200U  
+/*
+ * Weight pool size must be hardcoded: filters aren't built yet when this
+ * array is declared, so the real total (see get_mel_weight_pool_size) isn't
+ * known until after mel_filterbank_init() runs.
+ *
+ * Required_size = (bin_points[N] + bin_points[N+1]) - (bin_points[0] + bin_points[1]) + N
+ * where N = NUM_MEL_BANDS.
+ *  
+ * At 16000 Hz, 128 bands, 100-8000 Hz: calculated 1128, sized to 1200 for margin.
+ * Recompute if sample rate, band count, or frequency range changes.
+ */
 
 typedef struct {
     uint16_t   start_bin;
@@ -16,6 +26,21 @@ typedef struct {
 static mel_filter_t _mel_filters[NUM_MEL_BANDS];
 static float32_t    _mel_weight_pool[MEL_WEIGHT_POOL_SIZE]; // Store all Mel weights contiguously to avoid per-filter padding
 static float32_t    _power_spectrum[SPECTRUM_BINS];
+
+
+/*
+ * Ground truth for MEL_WEIGHT_POOL_SIZE. If overflow is suspected (or after
+ * changing sample rate / band count / frequency range), set the define well
+ * above the expected value, call this after mel_filterbank_init(), print the
+ * result, then set MEL_WEIGHT_POOL_SIZE to that value plus some margin.
+ */
+uint32_t get_mel_weight_pool_size(void)
+{	
+	uint32_t total = 0;
+	for (uint32_t i = 0; i < NUM_MEL_BANDS; ++i)
+		total += _mel_filters[i].num_bins;
+	return total;
+}
 
 static void get_power_magnitudes(const float32_t (*spec)[SPECTRUM_FLOATS])
 {
