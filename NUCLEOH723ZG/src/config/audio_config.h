@@ -25,7 +25,7 @@
 #endif
 
 #ifndef AUDIO_SAMPLE_RATE_HZ
-#define AUDIO_SAMPLE_RATE_HZ 48000
+#define AUDIO_SAMPLE_RATE_HZ 16000
 #endif
 
 #ifndef AUDIO_SAMPLE_BITS

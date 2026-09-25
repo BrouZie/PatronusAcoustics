@@ -1,8 +1,8 @@
 #include "app_entry.h"
 #include "arm_math.h"
 #include "audio_config.h"
-#include "console.h"
 #include "ics52000.h"
+#include "console.h"
 #include "spectrum.h"
 #include "log-mel_spectogram.h"
 #include <stdint.h>
@@ -59,13 +59,14 @@ void app_main(void)
 	UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
     spectrum_init();
 	mel_filterbank_init();
-    ics52000_start();
+	uint32_t pool = get_mel_weight_pool_size();
+	ics52000_start();
 
-    uint16_t frame_idx = 0;
-    uint32_t seq       = 0;
+	uint16_t frame_idx = 0;
+	uint32_t seq       = 0;
 
-    while (1)
-    {
+	while (1)
+	{
         if (ics52000_read(frame))
         {
             spectrum_compute(frame, &spectrum);
@@ -74,25 +75,25 @@ void app_main(void)
 	        uint8_t* out = _logmel_frame[_active_write_buf];
             uint8_t* cells;
 
-            if (frame_idx == 0) {
-                logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
-                *hdr = (logmel_header_t){
-                    .magic = LOGMEL_MAGIC,
-                    .seq   = seq,
-                };
-                cells = _logmel_first_frame + sizeof(logmel_header_t);
+		          if (frame_idx == 0) {
+		              logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
+		              *hdr = (logmel_header_t){
+		                  .magic = LOGMEL_MAGIC,
+		                  .seq   = seq,
+		              };
+		              cells = _logmel_first_frame + sizeof(logmel_header_t);
 				for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
 					cells[b] = quantize_db(_logmel_frame_f32[b]);
 
 				UART_MDMA_send_buffer(_logmel_first_frame, sizeof(logmel_header_t) + NUM_MEL_BANDS);
-            } else {
-                cells = out;
+		          } else {
+		              cells = out;
 				for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
 					cells[b] = quantize_db(_logmel_frame_f32[b]);
 
-                UART_MDMA_send_buffer(cells, NUM_MEL_BANDS);
-                _active_write_buf ^= 1U;
-            }
+		              UART_MDMA_send_buffer(cells, NUM_MEL_BANDS);
+		              _active_write_buf ^= 1U;
+		          }
 
 			if (++frame_idx == NUM_FRAMES) { frame_idx = 0; seq++; }
 		}

@@ -13,13 +13,13 @@
  * Hop_length given by number of new samples introduced between one window and the next
 */
 
-#define NUM_FRAMES    94
-#define NUM_MEL_BANDS 64
-#define MIN_FREQUENCY        100
-#define MAX_FREQUENCY        6000
+#define NUM_FRAMES    62
+#define NUM_MEL_BANDS 128
+#define MIN_FREQUENCY 100
+#define MAX_FREQUENCY 8000
 
 void mel_filterbank_init(void);
 void get_logmel_frame(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* mel_out);
-
+uint32_t get_mel_weight_pool_size(void);
 
 #endif
