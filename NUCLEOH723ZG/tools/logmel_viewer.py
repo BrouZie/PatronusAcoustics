@@ -46,7 +46,7 @@ IDLE_TICKS = 150            # warn after ~3 s with no packet
 # --- scale it was never trained on. Bump MAGIC if any of these change.
 FRAMES = 62                # rows in the image (time)
 BANDS = 128                   # columns in the image (mel bands)
-RATE = 48000                 # sample rate, Hz
+RATE = 16000                 # sample rate, Hz
 HOP = 512                    # hop size in samples between frames
 MIN_FREQ = 100                # Hz
 MAX_FREQ = 8000              # Hz
