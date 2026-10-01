@@ -10,20 +10,12 @@
 
 #define SPECTRUM_FLOATS 1026
 #define SPECTRUM_BINS   (SPECTRUM_FLOATS / 2)
+#define SPECTRUM_FFT_SIZE (SPECTRUM_FLOATS - 2)
 #define NUM_MICS 2
 #define NUM_MIC_PAIRS 1
 #define PHAT_BETA 0.7f       // proven to yield better results 0.6 - 0.8 
 #define PHAT_EPS 1e-12f      // avoids zero-division in gcc_phat
 #define SAMPLE_RATE 16000
-
-const float32_t mic_array[NUM_MICS][3] = {
-	{ 0.0f, 0.0f, 0.0f },
-	{ 1.0f, 1.0f, 0.0f },
-};
-
-const float32_t candidate_grid[5] = {
-	80.0f, 85.0f, 90.0f, 95.0f, 100.0f
-};
 
 typedef struct
 {
@@ -35,25 +27,38 @@ typedef struct
 typedef struct
 {
     float real, imag;
-} bin_t;
+} complex_t;
 
-bin_t  WhitenedFreqDomain[SPECTRUM_BINS];
+//=============== CONFIG FUCKERS ===============//
 
-// typedef struct
-// {
-//     float32_t spectrum[NUM_MICS][SPECTRUM_FLOATS];
-// } srp_t;
+// TODO: Replaced by caller eventually (*spec)[SIZE]
+static float32_t InSpectrum[NUM_MICS][SPECTRUM_FLOATS];
 
-/// BUFFERS
-static float32_t Spectrum[NUM_MICS][SPECTRUM_FLOATS];
+// TODO: Add to surface/call-site as well (same in spectrum.c)
 static arm_rfft_fast_instance_f32 RfftCfg;
-bin_t _TIME_DOMAIN[NUM_MICS][SPECTRUM_BINS];
 
-#define SPECTRUM_FFT_SIZE 1024
-static float32_t _PACKED[SPECTRUM_FFT_SIZE];     // 1024 floats: IFFT input (gets destroyed)
-static float32_t CorrelationCoefficients[SPECTRUM_FFT_SIZE];         // 1024 floats: IFFT output
+static float32_t MicArrayCfg[NUM_MICS][3] = {
+	{ 0.0f, 0.0f, 0.0f },
+	{ 1.0f, 1.0f, 0.0f },
+};
 
-bin_t gcc_phat(float* restrict mic_l, float* restrict mic_m)
+#define DIRECTIONS 5
+static float32_t CandidateGrid[DIRECTIONS] = {
+	80.0f, 85.0f, 90.0f, 95.0f, 100.0f
+};
+
+// TODO: Pre-compute tau values/lags dependent upon candidate grid
+static uint16_t LagIndex[DIRECTIONS][NUM_MIC_PAIRS]; // NOTE: Do rounding first, then introduce TAPS (weighted mix - i0, i1, w)
+
+// GCC-PHAT frequency domain output
+static complex_t  WhitenedFreqDomain[SPECTRUM_BINS];
+// GCC-PHAT time domain output (finalized) - IFFT output
+static float32_t CorrelationCoefficients[NUM_MICS][SPECTRUM_FFT_SIZE];
+
+// TODO: Find a way to be independent upon this back and forth packing stuff
+static float32_t _PACKED[SPECTRUM_FFT_SIZE];
+
+complex_t gcc_phat(float* restrict mic_l, float* restrict mic_m)
 {
     float real = mic_l[0] * mic_m[0] + mic_l[1] * mic_m[1];
     float imag = mic_l[1] * mic_m[0] - mic_l[0] * mic_m[1];
@@ -61,7 +66,7 @@ bin_t gcc_phat(float* restrict mic_l, float* restrict mic_m)
     float mag_sq  = real * real + imag * imag;
     float denom   = powf(mag_sq, 0.5 * PHAT_BETA) + PHAT_EPS;
 
-    return (bin_t) {
+    return (complex_t) {
 		.real = real / denom,
 		.imag = imag / denom
 	};
@@ -69,7 +74,7 @@ bin_t gcc_phat(float* restrict mic_l, float* restrict mic_m)
 
 // Reduces 4 (2 x 2) -> 2 samples
 // aliasing problem if we were to do pointers i guess
-bin_t arm_gcc_phat(float* mic_l, float* mic_m)
+complex_t arm_gcc_phat(float* mic_l, float* mic_m)
 {
 	float32_t real = mic_l[0] * mic_m[0] + mic_l[1] * mic_m[1];
 	float32_t imag = mic_l[1] * mic_m[0] - mic_l[0] * mic_m[1];
@@ -77,7 +82,7 @@ bin_t arm_gcc_phat(float* mic_l, float* mic_m)
 	float32_t mag_sq = real * real + imag * imag;
     float32_t denom  = powf(mag_sq, 0.5f * PHAT_BETA) + PHAT_EPS; // NOTE: powf is expensive - consider using approximation instead
 
-	return (bin_t) {
+	return (complex_t) {
 		.real = real / denom,
 		.imag = imag / denom
 	};
@@ -92,11 +97,12 @@ void remove_when_spectrum_is_refined()
     // correlation_bins[0..512] -> CMSIS packed [DC.re, Nyq.re, b1.re, b1.im, ..., b511.re, b511.im]
     _PACKED[0] = WhitenedFreqDomain[0].real;                  // DC (imag is 0 anyway)
     _PACKED[1] = WhitenedFreqDomain[SPECTRUM_BINS - 1].real;  // Nyquist
-    memcpy(&_PACKED[2], &WhitenedFreqDomain[1], (SPECTRUM_BINS - 2) * sizeof(bin_t));
+    memcpy(&_PACKED[2], &WhitenedFreqDomain[1], (SPECTRUM_BINS - 2) * sizeof(complex_t));
 }
 
 void compute_signal_features(float32_t (*spec)[SPECTRUM_FLOATS])
 {
+    // TODO: Add multiple mics (additional for loop)
 	for (int bin_idx = 0; bin_idx < SPECTRUM_BINS; ++bin_idx)
 	{
 		WhitenedFreqDomain[bin_idx] = arm_gcc_phat(&spec[0][bin_idx * 2], &spec[1][bin_idx * 2]);
@@ -106,7 +112,7 @@ void compute_signal_features(float32_t (*spec)[SPECTRUM_FLOATS])
     remove_when_spectrum_is_refined(); // re-packs bins
 
 	#define INVERSE_FFT 1
-	arm_rfft_fast_f32(&RfftCfg, _PACKED, CorrelationCoefficients, INVERSE_FFT);
+	arm_rfft_fast_f32(&RfftCfg, _PACKED, CorrelationCoefficients[0], INVERSE_FFT);
 }
 
 void print_features()
@@ -123,7 +129,7 @@ void print_time_domain()
 	{
 		for (int i = 0; i < SPECTRUM_FFT_SIZE; ++i)
 		{
-            printf("Corrcoeff[%d]: %f\n", i, CorrelationCoefficients[i]);
+            printf("Corrcoeff[%d]: %f\n", i, CorrelationCoefficients[0][i]);
 		}
 	}
 }
@@ -149,7 +155,7 @@ void populate_spectrum(rng_t* seed)
 	{
 		for (int sample = 0; sample < SPECTRUM_FLOATS; ++sample)
 		{
-			Spectrum[mic][sample] = arm_rng_rangef32(seed, (float32_t)1e-4f, (float32_t)20.0f);
+			InSpectrum[mic][sample] = arm_rng_rangef32(seed, (float32_t)1e-4f, (float32_t)20.0f);
 		}
 	}
 }
@@ -182,16 +188,16 @@ int argmax(float32_t* list, int size)
 int main()
 {
 	rng_t r;
-	rng_seed_entropy(&r);
+	rng_seed(&r, 0);
 
 	populate_spectrum(&r);
-	float32_t (*spec)[SPECTRUM_FLOATS] = Spectrum;
+	float32_t (*spec)[SPECTRUM_FLOATS] = InSpectrum;
 
     compute_signal_features(spec);
     print_time_domain();
 
-    int idxBiggest = argmax(CorrelationCoefficients, SPECTRUM_FFT_SIZE);
-    printf("\nLargest value is %f at index: %d\n", CorrelationCoefficients[idxBiggest], idxBiggest);
+    int idxBiggest = argmax(CorrelationCoefficients[0], SPECTRUM_FFT_SIZE);
+    printf("\nLargest value is %f at index: %d\n", CorrelationCoefficients[0][idxBiggest], idxBiggest);
 
     return 0;
 }
