@@ -23,8 +23,8 @@
 #define LOGMEL_FRAME_DTCM_BUF     ".dtcm_buf" // -> DTCMRAM
 #define LOGMEL_SPECTOGRAM_RAM_BUF ".d1_buf"   // -> RAM_D1
 #define LOGMEL_MAGIC              0x4C454D4C
-#define LOGMEL_Q_SCALE            2.83f      // ~0.35 dB/step over ~90 dB range — tune to your data
-#define LOGMEL_Q_OFFSET           -80.0f     // dB value that maps to byte 0
+#define LOGMEL_Q_SCALE            2.0f      
+#define LOGMEL_Q_OFFSET           -100.0f    
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;       // LOGMEL_MAGIC
@@ -59,7 +59,6 @@ void app_main(void)
 	UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
     spectrum_init();
 	mel_filterbank_init();
-	uint32_t pool = get_mel_weight_pool_size();
 	ics52000_start();
 
 	uint16_t frame_idx = 0;

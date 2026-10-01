@@ -36,8 +36,9 @@ PORT = "/dev/ttyACM0"
 BAUD = 921600
 
 SECONDS_SHOWN = 12.0        # width of the scrolling view
-AUTO_LEVELS = True          # track the signal's own range; False uses LEVELS
-LEVELS = (-6.0, 4.0)
+# AUTO_LEVELS = True          # track the signal's own range; False uses LEVELS
+AUTO_LEVELS = False          # track the signal's own range; False uses LEVELS
+LEVELS = (-100, 30)
 TICK_MS = 20
 IDLE_TICKS = 150            # warn after ~3 s with no packet
 
@@ -71,6 +72,7 @@ credit = 0.0                    # fractional columns owed to the display
 idle_ticks = nbytes = nimages = ndropped = 0
 last_seq = None
 sample_bytes = bytearray()      # first bytes seen, for the no-header diagnostic
+
 
 
 def find_packet():

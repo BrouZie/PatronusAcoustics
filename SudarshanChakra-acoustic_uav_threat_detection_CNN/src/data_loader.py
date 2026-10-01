@@ -55,8 +55,8 @@ class LogMelSpectrogram(nn.Module):
             power=2.0,  # Power spectrogram
             center=True,
             pad_mode="constant",
-            norm="slaney",
-            mel_scale="slaney",
+            norm="None",
+            mel_scale="htk",
         )
 
     @torch.no_grad()

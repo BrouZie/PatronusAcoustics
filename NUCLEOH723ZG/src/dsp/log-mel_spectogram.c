@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define EPSILON              1.0e-6f 
-#define MEL_WEIGHT_POOL_SIZE 1200U  
+#define EPSILON              1.0e-6f
+#define MEL_WEIGHT_POOL_SIZE 1400U
 /*
  * Weight pool size must be hardcoded: filters aren't built yet when this
  * array is declared, so the real total (see get_mel_weight_pool_size) isn't
@@ -12,7 +12,7 @@
  *
  * Required_size = (bin_points[N] + bin_points[N+1]) - (bin_points[0] + bin_points[1]) + N
  * where N = NUM_MEL_BANDS.
- *  
+ *
  * At 16000 Hz, 128 bands, 100-8000 Hz: calculated 1128, sized to 1200 for margin.
  * Recompute if sample rate, band count, or frequency range changes.
  */
@@ -35,7 +35,7 @@ static float32_t    _power_spectrum[SPECTRUM_BINS];
  * result, then set MEL_WEIGHT_POOL_SIZE to that value plus some margin.
  */
 uint32_t get_mel_weight_pool_size(void)
-{	
+{
 	uint32_t total = 0;
 	for (uint32_t i = 0; i < NUM_MEL_BANDS; ++i)
 		total += _mel_filters[i].num_bins;
@@ -54,7 +54,7 @@ static void get_power_magnitudes(const float32_t (*spec)[SPECTRUM_FLOATS])
 	}
 }
 
-static float32_t hz_to_mel(float32_t freq)
+static float32_t hz_to_mel(float32_t freq) //Slaney
 {
 	return 2595 * log10f(1 + freq/700.0f);
 }
@@ -135,7 +135,7 @@ static void apply_logmel(float32_t* mel_out)
 		/* Compute mel-band energy as the weighted sum of the power spectrum. */
 		arm_dot_prod_f32(&_power_spectrum[filter->start_bin], filter->weights_addr, filter->num_bins, &mel_out[mel_idx]);
 		/* Convert mel-band energy to log10 scale; EPSILON prevents log10(0). */
-		mel_out[mel_idx] = log10f(mel_out[mel_idx] + EPSILON);
+		mel_out[mel_idx] = 10.0 * log10f(mel_out[mel_idx] + EPSILON);
 	}
 }
 
