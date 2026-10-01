@@ -37,7 +37,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.model import get_model
-from src.data_loader import get_data_loaders
+from src.data_loader import get_data_loaders, LogMelSpectrogram, augment_spectrogram
 
 
 class EarlyStopping:
@@ -117,6 +117,9 @@ class Trainer:
         self.val_loader = val_loader
         self.test_loader = test_loader
 
+        # Waveform -> Mel-Spectrogram conversion on the training device
+        self.frontend = LogMelSpectrogram().to(self.device)
+
         # Loss function with class weights for imbalanced data
         if class_weights is not None:
             class_weights = class_weights.to(self.device)
@@ -135,7 +138,7 @@ class Trainer:
             mode="min",
             factor=0.5,
             patience=5,
-            verbose=True,
+            # verbose=True,
         )
 
         # Early stopping
@@ -168,14 +171,18 @@ class Trainer:
             Tuple of (average_loss, accuracy)
         """
         self.model.train()
-        total_loss = 0.0
-        correct = 0
+        # Accumulated on the device to avoid a GPU sync per statistic
+        total_loss = torch.zeros((), device=self.device)
+        correct = torch.zeros((), device=self.device, dtype=torch.long)
         total = 0
 
         pbar = tqdm(self.train_loader, desc="Training", leave=False)
         for batch_x, batch_y in pbar:
-            batch_x = batch_x.to(self.device)
-            batch_y = batch_y.to(self.device)
+            batch_x = batch_x.to(self.device, non_blocking=True)
+            batch_y = batch_y.to(self.device, non_blocking=True)
+
+            # Feature extraction + augmentation on the device
+            batch_x = augment_spectrogram(self.frontend(batch_x))
 
             # Forward pass
             self.optimizer.zero_grad()
@@ -188,15 +195,15 @@ class Trainer:
             self.optimizer.step()
 
             # Statistics
-            total_loss += loss.item() * batch_x.size(0)
+            total_loss += loss.detach() * batch_x.size(0)
             _, predicted = outputs.max(1)
             total += batch_y.size(0)
-            correct += predicted.eq(batch_y).sum().item()
+            correct += predicted.eq(batch_y).sum()
 
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-        avg_loss = total_loss / total
-        accuracy = correct / total
+        avg_loss = total_loss.item() / total
+        accuracy = correct.item() / total
 
         return avg_loss, accuracy
 
@@ -217,8 +224,10 @@ class Trainer:
         all_labels = []
 
         for batch_x, batch_y in loader:
-            batch_x = batch_x.to(self.device)
-            batch_y = batch_y.to(self.device)
+            batch_x = batch_x.to(self.device, non_blocking=True)
+            batch_y = batch_y.to(self.device, non_blocking=True)
+
+            batch_x = self.frontend(batch_x)
 
             outputs = self.model(batch_x)
             loss = self.criterion(outputs, batch_y)
@@ -341,7 +350,8 @@ class Trainer:
 
     def load_checkpoint(self, path: Path) -> Dict:
         """Load model checkpoint."""
-        checkpoint = torch.load(path, map_location=self.device)
+        # Checkpoint stores numpy metrics alongside the weights
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])

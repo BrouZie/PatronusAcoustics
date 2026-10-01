@@ -26,7 +26,7 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.model import get_model
-from src.data_loader import AudioTransform
+from src.data_loader import AudioTransform, LogMelSpectrogram
 
 
 class ThreatDetector:
@@ -57,6 +57,7 @@ class ThreatDetector:
         self.device = device or Config.get_device()
         self.threshold = threshold
         self.transform = AudioTransform()
+        self.frontend = LogMelSpectrogram().to(self.device)
 
         # Load model
         self.model_path = model_path or Config.MODEL_DIR / "best_model.pth"
@@ -79,7 +80,8 @@ class ThreatDetector:
         model = get_model(Config.MODEL_TYPE)
 
         # Load trained weights
-        checkpoint = torch.load(self.model_path, map_location=self.device)
+        # Checkpoint stores numpy metrics alongside the weights
+        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
 
         # Set to evaluation mode
@@ -111,8 +113,8 @@ class ThreatDetector:
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
         # Transform audio to spectrogram
-        spectrogram = self.transform(audio_path)
-        spectrogram = spectrogram.unsqueeze(0).to(self.device)  # Add batch dim
+        waveform = torch.from_numpy(self.transform.load_audio(audio_path))
+        spectrogram = self.frontend(waveform.unsqueeze(0).to(self.device))  # Add batch dim
 
         # Model inference
         logits = self.model(spectrogram)

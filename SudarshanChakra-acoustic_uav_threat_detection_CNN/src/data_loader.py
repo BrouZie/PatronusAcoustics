@@ -2,8 +2,9 @@
 SudarshanChakra - Data Loader Module
 Custom PyTorch Dataset for acoustic threat detection.
 
-Converts raw audio waveforms to Mel-Spectrograms on-the-fly
-for efficient GPU memory usage during training.
+The Dataset only loads fixed-length raw waveforms. Mel-Spectrogram
+conversion and augmentation run batched on the training device
+(see LogMelSpectrogram and augment_spectrogram).
 """
 
 import sys
@@ -12,13 +13,117 @@ from typing import Tuple, List, Optional, Dict
 import numpy as np
 
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import librosa
+import torchaudio
 
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.data_ingestion import DataIngestion
+
+
+class LogMelSpectrogram(nn.Module):
+    """
+    Batched waveform -> normalized log-Mel-Spectrogram front end.
+
+    Runs on whatever device the module is moved to, so feature extraction
+    happens on the GPU during training. Parameters mirror librosa's
+    melspectrogram / power_to_db defaults.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = Config.SAMPLE_RATE,
+        n_mels: int = Config.N_MELS,
+        n_fft: int = Config.N_FFT,
+        hop_length: int = Config.HOP_LENGTH,
+        f_min: float = Config.F_MIN,
+        f_max: float = Config.F_MAX,
+        top_db: float = 80.0,
+    ):
+        super().__init__()
+        self.top_db = top_db
+        self.mel = torchaudio.transforms.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            f_min=float(f_min),
+            f_max=float(f_max),
+            power=2.0,  # Power spectrogram
+            center=True,
+            pad_mode="constant",
+            norm="slaney",
+            mel_scale="slaney",
+        )
+
+    @torch.no_grad()
+    def forward(self, waveform: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            waveform: Audio tensor of shape (batch, n_samples)
+
+        Returns:
+            Tensor of shape (batch, 1, n_mels, time_frames) in [0, 1]
+        """
+        mel_spec = self.mel(waveform)
+
+        # Convert to log scale (dB) relative to each sample's peak
+        mel_spec_db = 10.0 * torch.log10(mel_spec.clamp_min(1e-10))
+        mel_spec_db = mel_spec_db - mel_spec_db.amax(dim=(1, 2), keepdim=True)
+        mel_spec_db = mel_spec_db.clamp_min(-self.top_db)
+
+        # Normalize to [0, 1] range per sample
+        spec_min = mel_spec_db.amin(dim=(1, 2), keepdim=True)
+        spec_max = mel_spec_db.amax(dim=(1, 2), keepdim=True)
+        mel_spec_norm = (mel_spec_db - spec_min) / (spec_max - spec_min + 1e-8)
+
+        return mel_spec_norm.unsqueeze(1)
+
+
+@torch.no_grad()
+def augment_spectrogram(batch: torch.Tensor) -> torch.Tensor:
+    """
+    Apply data augmentation to a batch of spectrograms on its own device.
+
+    Each sample independently gets:
+    - Time masking: Random time segment set to zero
+    - Frequency masking: Random frequency band set to zero
+    - Random noise: Small Gaussian noise addition
+
+    Args:
+        batch: Tensor of shape (batch, 1, n_mels, time_frames)
+
+    Returns:
+        Augmented tensor of the same shape
+    """
+    batch_size, _, n_mels, n_frames = batch.shape
+    device = batch.device
+
+    # Time masking (SpecAugment style)
+    t_mask_size = int(n_frames * 0.1)
+    t_start = torch.randint(0, n_frames - t_mask_size, (batch_size, 1), device=device)
+    frames = torch.arange(n_frames, device=device)
+    t_mask = (frames >= t_start) & (frames < t_start + t_mask_size)
+    t_mask &= torch.rand(batch_size, 1, device=device) > 0.5
+    batch = batch.masked_fill(t_mask[:, None, None, :], 0.0)
+
+    # Frequency masking
+    f_mask_size = int(n_mels * 0.1)
+    f_start = torch.randint(0, n_mels - f_mask_size, (batch_size, 1), device=device)
+    bins = torch.arange(n_mels, device=device)
+    f_mask = (bins >= f_start) & (bins < f_start + f_mask_size)
+    f_mask &= torch.rand(batch_size, 1, device=device) > 0.5
+    batch = batch.masked_fill(f_mask[:, None, :, None], 0.0)
+
+    # Add small noise
+    add_noise = torch.rand(batch_size, 1, 1, 1, device=device) > 0.7
+    noisy = torch.clamp(batch + torch.randn_like(batch) * 0.01, 0, 1)
+    batch = torch.where(add_noise, noisy, batch)
+
+    return batch
 
 
 class AudioTransform:
@@ -47,6 +152,14 @@ class AudioTransform:
         self.hop_length = hop_length
         self.f_min = f_min
         self.f_max = f_max
+        self.frontend = LogMelSpectrogram(
+            sample_rate=sample_rate,
+            n_mels=n_mels,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            f_min=f_min,
+            f_max=f_max,
+        )
 
     def load_audio(self, file_path: Path) -> np.ndarray:
         """
@@ -96,28 +209,8 @@ class AudioTransform:
         Returns:
             Log-scaled Mel-Spectrogram as 2D array
         """
-        # Compute Mel-Spectrogram
-        mel_spec = librosa.feature.melspectrogram(
-            y=waveform,
-            sr=self.sample_rate,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            n_mels=self.n_mels,
-            fmin=self.f_min,
-            fmax=self.f_max,
-            power=2.0  # Power spectrogram
-        )
-
-        # Convert to log scale (dB)
-        # Add small epsilon to avoid log(0)
-        mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
-
-        # Normalize to [0, 1] range
-        mel_spec_norm = (mel_spec_db - mel_spec_db.min()) / (
-            mel_spec_db.max() - mel_spec_db.min() + 1e-8
-        )
-
-        return mel_spec_norm
+        batch = torch.from_numpy(waveform).unsqueeze(0)
+        return self.frontend(batch)[0, 0].numpy()
 
     def __call__(self, file_path: Path) -> torch.Tensor:
         """
@@ -130,20 +223,17 @@ class AudioTransform:
             Mel-Spectrogram tensor of shape (1, n_mels, time_frames)
         """
         waveform = self.load_audio(file_path)
-        mel_spec = self.to_mel_spectrogram(waveform)
+        batch = torch.from_numpy(waveform).unsqueeze(0)
 
-        # Convert to tensor and add channel dimension
-        tensor = torch.FloatTensor(mel_spec).unsqueeze(0)
-
-        return tensor
+        return self.frontend(batch).squeeze(0)
 
 
 class DroneAudioDataset(Dataset):
     """
     PyTorch Dataset for drone acoustic detection.
 
-    Loads audio files on-demand and converts them to Mel-Spectrograms.
-    Supports data augmentation for improved model robustness.
+    Loads audio files on-demand as fixed-length waveforms. Mel-Spectrogram
+    conversion and augmentation are applied per batch on the training device.
     """
 
     def __init__(
@@ -151,7 +241,6 @@ class DroneAudioDataset(Dataset):
         drone_files: List[Path],
         background_files: List[Path],
         transform: Optional[AudioTransform] = None,
-        augment: bool = False,
     ):
         """
         Initialize the dataset.
@@ -160,10 +249,8 @@ class DroneAudioDataset(Dataset):
             drone_files: List of paths to drone audio files
             background_files: List of paths to background audio files
             transform: Audio transform pipeline (default: AudioTransform)
-            augment: Whether to apply data augmentation
         """
         self.transform = transform or AudioTransform()
-        self.augment = augment
 
         # Combine files with labels
         # Label 0 = Safe (Background), Label 1 = Threat (Drone)
@@ -190,47 +277,13 @@ class DroneAudioDataset(Dataset):
             idx: Sample index
 
         Returns:
-            Tuple of (mel_spectrogram_tensor, label)
+            Tuple of (waveform_tensor of shape (n_samples,), label)
         """
         file_path, label = self.samples[idx]
 
-        # Transform audio to spectrogram
-        spectrogram = self.transform(file_path)
+        waveform = self.transform.load_audio(file_path)
 
-        # Apply augmentation if enabled
-        if self.augment:
-            spectrogram = self._augment(spectrogram)
-
-        return spectrogram, label
-
-    def _augment(self, spectrogram: torch.Tensor) -> torch.Tensor:
-        """
-        Apply data augmentation to spectrogram.
-
-        Augmentations:
-        - Time masking: Random time segments set to zero
-        - Frequency masking: Random frequency bands set to zero
-        - Random noise: Small Gaussian noise addition
-        """
-        # Time masking (SpecAugment style)
-        if torch.rand(1).item() > 0.5:
-            t_mask_size = int(spectrogram.shape[2] * 0.1)
-            t_start = torch.randint(0, spectrogram.shape[2] - t_mask_size, (1,)).item()
-            spectrogram[:, :, t_start:t_start + t_mask_size] = 0
-
-        # Frequency masking
-        if torch.rand(1).item() > 0.5:
-            f_mask_size = int(spectrogram.shape[1] * 0.1)
-            f_start = torch.randint(0, spectrogram.shape[1] - f_mask_size, (1,)).item()
-            spectrogram[:, f_start:f_start + f_mask_size, :] = 0
-
-        # Add small noise
-        if torch.rand(1).item() > 0.7:
-            noise = torch.randn_like(spectrogram) * 0.01
-            spectrogram = spectrogram + noise
-            spectrogram = torch.clamp(spectrogram, 0, 1)
-
-        return spectrogram
+        return torch.from_numpy(waveform), label
 
     def get_class_weights(self) -> torch.Tensor:
         """
@@ -301,12 +354,15 @@ def get_data_loaders(
     print(f"  Test:       {len(drone_test)} drone, {len(bg_test)} background")
 
     # Create datasets
-    train_dataset = DroneAudioDataset(drone_train, bg_train, augment=True)
-    val_dataset = DroneAudioDataset(drone_val, bg_val, augment=False)
-    test_dataset = DroneAudioDataset(drone_test, bg_test, augment=False)
+    train_dataset = DroneAudioDataset(drone_train, bg_train)
+    val_dataset = DroneAudioDataset(drone_val, bg_val)
+    test_dataset = DroneAudioDataset(drone_test, bg_test)
 
     # Get class weights from training set
     class_weights = train_dataset.get_class_weights()
+
+    # Keep workers alive between epochs instead of re-spawning them
+    persistent_workers = num_workers > 0
 
     # Create data loaders
     train_loader = DataLoader(
@@ -315,6 +371,7 @@ def get_data_loaders(
         shuffle=True,
         num_workers=num_workers,
         pin_memory=Config.PIN_MEMORY,
+        persistent_workers=persistent_workers,
         drop_last=True,
     )
 
@@ -324,6 +381,7 @@ def get_data_loaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=Config.PIN_MEMORY,
+        persistent_workers=persistent_workers,
     )
 
     test_loader = DataLoader(
@@ -332,6 +390,7 @@ def get_data_loaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=Config.PIN_MEMORY,
+        persistent_workers=persistent_workers,
     )
 
     return train_loader, val_loader, test_loader, class_weights
