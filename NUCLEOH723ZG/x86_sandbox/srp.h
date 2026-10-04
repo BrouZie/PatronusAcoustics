@@ -9,6 +9,7 @@
 #define SRP_SAMPLES_PER_METER ((float32_t)AUDIO_SAMPLE_RATE_HZ / SRP_SPEED_OF_SOUND)
 #define SRP_BETA 0.7f                   // proven to yield better results between 0.6 - 0.8
 #define SRP_EPS 1e-12f                  // TODO: Make it relative to running magnitude scale
+
 #define SRP_BAND_MIN_HZ 300             // only bins inside the band contribute
 #define SRP_BAND_MAX_HZ 3000
 
@@ -58,14 +59,18 @@ typedef struct
 } tap_t; // 2-tap fractional lag
 
 typedef struct {
-    /* --- built once by srp_init --- */
+    // --- built once by srp_init --- //
     arm_rfft_fast_instance_f32 ifft;
-    grid_t   grid;                                  // az/el derived from index, not stored
+    grid_t   grid;
     pair_t   pair[NUM_MIC_PAIRS];
     tap_t    tap[SRP_AZIMUTH_DIRECTIONS][NUM_MIC_PAIRS];
-    uint16_t bin_lo, bin_hi;                        // band limits (inclusive)
 
-    /* --- overwritten every hop --- */
+    // Band limiting to reduce work
+    // Set to SRP_BAND_MIN_HZ & SRP_BAND_MAX_HZ at init
+    uint16_t bin_lo;
+    uint16_t bin_hi;
+
+    // --- overwritten every hop --- //
     float32_t packed[SPECTRUM_FFT_SIZE];
     float32_t corr[NUM_MIC_PAIRS][SPECTRUM_FFT_SIZE];
     float32_t map[SRP_AZIMUTH_DIRECTIONS];

@@ -21,7 +21,7 @@
 // --------- Tunables ---------
 
 #ifndef AUDIO_MIC_COUNT
-#define AUDIO_MIC_COUNT 1
+#define AUDIO_MIC_COUNT 2
 #endif
 
 #ifndef AUDIO_SAMPLE_RATE_HZ
@@ -38,7 +38,13 @@
 #define AUDIO_SAMPLES_PER_BLOCK 512
 #endif
 
+#ifndef SRP_AZIMUTH_DIRECTIONS
+#define SRP_AZIMUTH_DIRECTIONS 120
+#endif
+
 //--------- Derived. Don't edit by hand! ---------
+
+#define NUM_MIC_PAIRS (AUDIO_MIC_COUNT * (AUDIO_MIC_COUNT - 1) / 2)
 
 /* Largest positive sample magnitude, i.e. 0 dBFS. Float, because at 32 bits
  * this does not fit in a signed 32-bit integer. */
@@ -52,7 +58,7 @@
 #define AUDIO_BLOCK_SAMPLES (AUDIO_SAMPLES_PER_BLOCK * AUDIO_MIC_COUNT)
 
 /* One landed _dtcm_block half = one hop. Output frames are 2 hops: 50% overlap. */
-#define ICS_HOP_SAMPLES AUDIO_SAMPLES_PER_BLOCK
+#define ICS_HOP_SAMPLES   AUDIO_SAMPLES_PER_BLOCK
 #define ICS_FRAME_SAMPLES (2 * ICS_HOP_SAMPLES)
 
 // Fast Fourier Tranform buffer

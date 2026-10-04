@@ -1,6 +1,12 @@
-#include "srp-phat.h"
+#include "srp.h"
+#include "audio_config.h"
+#include "random.h"
 
-#include <string.h>
+#include <stdio.h>
+
+// Where populate_spectrum places the dummy source
+#define TEST_SOURCE_AZ_DEG 60.0f
+#define TEST_SOURCE_EL_DEG 90.0f
 
 // Arrival delay per mic (in samples) for a plane wave from (az, el) degrees
 static void _mic_delays(const mic_array_t *arr, float32_t az, float32_t el, float32_t *delay)
@@ -41,7 +47,7 @@ static void _cross_spectra(srp_t *s, const float32_t spec[][SPECTRUM_FLOATS])
         // bins outside the band stay zero - refilled per pair since the IFFT destroys its input
         memset(s->packed, 0, sizeof(s->packed));
 
-        for (uint16_t bin_idx = s->bin_lo; bin_idx <= s->bin_hi; ++bin_idx)
+        for (uint16_t bin_idx = s->bin_lo; bin_idx <= s->bin_hi - 1; ++bin_idx)
         {
             _gcc_phat(&mic_l[bin_idx * 2], &mic_m[bin_idx * 2], &s->packed[bin_idx * 2]);
         }
@@ -80,7 +86,7 @@ static doa_t _peak(const srp_t *s)
         .az    = s->grid.az0 + (float32_t)(dir_idx / s->grid.el_steps) * s->grid.az_step,
         .el    = s->grid.el0 + (float32_t)(dir_idx % s->grid.el_steps) * s->grid.el_step,
         .power = power,
-        .ratio = 0.0f, // TODO: Add ratio
+        .ratio = 0.0f, // TODO
     };
 }
 
@@ -133,4 +139,59 @@ doa_t srp_compute(srp_t *restrict s, const float32_t spec[][SPECTRUM_FLOATS])
     _cross_spectra(s, spec);
     _steer(s);
     return _peak(s);
+}
+
+//=============== SANDBOX ===============//
+
+static const vec3_t MIC_POSITIONS[AUDIO_MIC_COUNT] = {
+    { -0.05f, 0.0f, 0.0f },
+    { 0.05f, 0.0f, 0.0f },
+};
+static const mic_array_t MIC_ARRAY = { .mic = MIC_POSITIONS, .count = AUDIO_MIC_COUNT };
+
+// el is polar angle from +z, 90 = array plane
+static const grid_t GRID = {
+    .az0 = 30.0f, .az_step = 1.0f, .az_steps = SRP_AZIMUTH_DIRECTIONS,
+    .el0 = 90.0f, .el_step = 1.0f, .el_steps = 1,
+};
+
+static srp_t     g_srp;
+static float32_t g_spec[AUDIO_MIC_COUNT][SPECTRUM_FLOATS];
+
+// One source: every mic gets the same random spectrum, phase shifted by its arrival delay
+static void populate_spectrum(rng_t *seed)
+{
+    float32_t delay[AUDIO_MIC_COUNT];
+    _mic_delays(&MIC_ARRAY, TEST_SOURCE_AZ_DEG, TEST_SOURCE_EL_DEG, delay);
+
+    for (int bin_idx = 0; bin_idx < SPECTRUM_BINS; ++bin_idx)
+    {
+        float32_t real = arm_rng_rangef32(seed, -1.0f, 1.0f);
+        float32_t imag = arm_rng_rangef32(seed, -1.0f, 1.0f);
+
+        for (int mic = 0; mic < AUDIO_MIC_COUNT; ++mic)
+        {
+            // delay of d samples = rotation by -2*pi*k*d/N at bin k
+            float32_t phase = -2.0f * PI * (float32_t)bin_idx * delay[mic] / (float32_t)SPECTRUM_FFT_SIZE;
+            float32_t cos_p = arm_cos_f32(phase);
+            float32_t sin_p = arm_sin_f32(phase);
+
+            g_spec[mic][bin_idx * 2]     = real * cos_p - imag * sin_p;
+            g_spec[mic][bin_idx * 2 + 1] = real * sin_p + imag * cos_p;
+        }
+    }
+}
+
+int main()
+{
+    rng_t r;
+    rng_seed(&r, 0);
+    populate_spectrum(&r);
+
+    srp_init(&g_srp, &MIC_ARRAY, &GRID);
+    doa_t doa = srp_compute(&g_srp, g_spec);
+
+    printf("az %.1f el %.1f power %f\n", doa.az, doa.el, doa.power);
+
+    return 0;
 }

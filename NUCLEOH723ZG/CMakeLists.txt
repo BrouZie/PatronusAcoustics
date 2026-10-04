@@ -53,7 +53,6 @@ if(PATRONUS_BLOCK_SIZE)
     add_compile_definitions(AUDIO_SAMPLES_PER_BLOCK=${PATRONUS_BLOCK_SIZE})
 endif()
 
-
 # ----------------------------------------------------------------------------
 # CubeMX generated layer
 #
@@ -171,6 +170,7 @@ set(CMSIS_DSP_SOURCES
     ${CMSIS_DSP_DIR}/Source/ComplexMathFunctions/ComplexMathFunctions.c
     ${CMSIS_DSP_DIR}/Source/FastMathFunctions/FastMathFunctions.c
     ${CMSIS_DSP_DIR}/Source/StatisticsFunctions/StatisticsFunctions.c
+    ${CMSIS_DSP_DIR}/Source/ControllerFunctions/ControllerFunctions.c
 )
 
 add_library(cmsis_dsp STATIC ${CMSIS_DSP_SOURCES})
