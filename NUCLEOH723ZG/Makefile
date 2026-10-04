@@ -1,17 +1,16 @@
 # ============================================================================
 # Convenience wrapper around the two CMake projects in this repo:
 #
-#   .      -> firmware, arm-none-eabi, build/<BUILD>/
-#   test/  -> host unit tests, system gcc, build/test/
+#   .             -> firmware, arm-none-eabi, build/<BUILD>/
+#   x86_sandbox/  -> host (x86) sandbox + CMSIS-DSP, system gcc, build/x86_sandbox/
 #
 # Usage:
 #   make APP=usart_echo           build one app
 #   make flash APP=usart_echo     build + flash it
 #   make debug APP=usart_echo     build + flash + GDB session
-#   make test                    build and run host tests
-#   make test TEST=ringbuf       run only matching tests
+#   make sandbox                 build and run the x86 sandbox
 #   make monitor                 open the serial console
-#   make list                    show available apps and tests
+#   make list                    show available apps
 #   make help                    this list, in more detail
 # ============================================================================
 
@@ -19,11 +18,10 @@ APP     ?= usart_echo
 BUILD   ?= Debug
 PORT    ?= /dev/ttyACM0
 BAUD    ?= 921600
-TEST    ?=
 JOBS    ?=
 
 BDIR     = build/$(BUILD)
-TDIR     = build/test
+SDIR     = build/x86_sandbox
 TOOLCHAIN = cmake/gcc-arm-none-eabi.cmake
 
 JOBFLAG  = $(if $(JOBS),-j $(JOBS),)
@@ -41,7 +39,7 @@ ELF         = $(BDIR)/$(APP).elf
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
-.PHONY: build all flash monitor test test-build configure configure-test \
+.PHONY: build all flash monitor sandbox configure \
         compiledb format list clean distclean debug gdbserver attach help
 
 # ---------------------------------------------------------------------------
@@ -130,20 +128,15 @@ monitor:
 	picocom -b $(BAUD) $(PORT)
 
 # ---------------------------------------------------------------------------
-# Host tests
+# x86 sandbox
 # ---------------------------------------------------------------------------
 
-$(TDIR)/build.ninja:
-	cmake -S test -B $(TDIR) -G Ninja -DCMAKE_BUILD_TYPE=Debug
+$(SDIR)/build.ninja:
+	cmake -S x86_sandbox -B $(SDIR) -G Ninja
 
-configure-test: $(TDIR)/build.ninja
-
-test-build: $(TDIR)/build.ninja
-	cmake --build $(TDIR) $(JOBFLAG)
-
-test: test-build
-	ctest --test-dir $(TDIR) --output-on-failure \
-		$(if $(TEST),-R $(TEST),)
+sandbox: $(SDIR)/build.ninja
+	cmake --build $(SDIR) $(JOBFLAG)
+	# ./$(SDIR)/srp
 
 # ---------------------------------------------------------------------------
 # Tooling
@@ -161,14 +154,10 @@ compiledb: $(BDIR)/build.ninja
 list:
 	@echo "Apps (src/apps/*):"
 	@ls -1 src/apps 2>/dev/null | sed 's/^/  /' || echo "  (none)"
-	@echo "Tests (test/test_*.c):"
-	@ls -1 test/test_*.c 2>/dev/null \
-		| xargs -n1 basename 2>/dev/null \
-		| sed 's/\.c$$//;s/^/  /' || echo "  (none)"
 
 clean:
-	@rm -rf $(BDIR) $(TDIR)
-	@echo "Removed $(BDIR) and $(TDIR)"
+	@rm -rf $(BDIR) $(SDIR)
+	@echo "Removed $(BDIR) and $(SDIR)"
 
 # Use this after changing anything about the toolchain -- CMake caches the
 # detected compiler on first configure and never reconsiders it.
@@ -185,10 +174,10 @@ help:
 	@echo "  gdbserver   OpenOCD in the foreground (own terminal)"
 	@echo "  attach      GDB onto a running gdbserver -- no reset, no flash"
 	@echo "  monitor     picocom on $(PORT) @ $(BAUD)"
-	@echo "  test        Build + run host unit tests (TEST=<regex> to filter)"
+	@echo "  sandbox     Build + run the x86 sandbox (x86_sandbox/)"
 	@echo "  compiledb   Symlink compile_commands.json for clangd"
-	@echo "  list        Show available apps and tests"
-	@echo "  clean       Remove build/$(BUILD) and build/test"
+	@echo "  list        Show available apps"
+	@echo "  clean       Remove build/$(BUILD) and build/x86_sandbox"
 	@echo "  distclean   Remove all of build/ (needed after toolchain changes)"
 	@echo ""
-	@echo "Variables: APP BUILD PORT BAUD TEST JOBS GDB_PORT"
+	@echo "Variables: APP BUILD PORT BAUD JOBS GDB_PORT"
