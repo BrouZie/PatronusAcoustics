@@ -27,6 +27,7 @@ Author: Defense AI Systems
 Version: 1.0.0
 """
 
+import os
 import sys
 import argparse
 from pathlib import Path
@@ -34,6 +35,17 @@ from pathlib import Path
 # Ensure project root is in path
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# Radeon RX 6700-series (Navi 22) is not officially supported by ROCm and
+# crashes unless it is presented as gfx1030. Must be set before torch loads.
+_NAVI22_IDS = {"0x1002:0x73df"}
+for _dev in Path("/sys/class/drm").glob("card*/device"):
+    try:
+        _pci_id = f"{(_dev / 'vendor').read_text().strip()}:{(_dev / 'device').read_text().strip()}"
+    except OSError:
+        continue
+    if _pci_id in _NAVI22_IDS:
+        os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "10.3.0")
 
 from configs.config import Config
 

@@ -55,7 +55,7 @@ class LogMelSpectrogram(nn.Module):
             power=2.0,  # Power spectrogram
             center=True,
             pad_mode="constant",
-            norm="None",
+            norm=None,
             mel_scale="htk",
         )
 
