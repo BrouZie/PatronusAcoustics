@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define EPSILON              1.0e-6f
+#define EPSILON              1.0e-10f
 #define MEL_WEIGHT_POOL_SIZE 1400U
 /*
  * Weight pool size must be hardcoded: filters aren't built yet when this
@@ -54,7 +54,7 @@ static void get_power_magnitudes(const float32_t (*spec)[SPECTRUM_FLOATS])
 	}
 }
 
-static float32_t hz_to_mel(float32_t freq) //Slaney
+static float32_t hz_to_mel(float32_t freq) // HTK
 {
 	return 2595 * log10f(1 + freq/700.0f);
 }
