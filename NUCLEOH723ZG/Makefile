@@ -26,7 +26,7 @@ TOOLCHAIN = cmake/gcc-arm-none-eabi.cmake
 
 JOBFLAG  = $(if $(JOBS),-j $(JOBS),)
 
-GDB        ?= arm-none-eabi-gdb
+GDB        ?= $(shell command -v gf2 2>/dev/null || command -v arm-none-eabi-gdb 2>/deb/null)
 OPENOCD    ?= openocd
 OOCD_IFACE ?= interface/stlink.cfg
 OOCD_TGT   ?= target/stm32h7x.cfg

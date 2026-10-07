@@ -10,6 +10,7 @@ From the repo root:
 
     uv run tools/spectrum_viewer.py
     uv run tools/logmel_viewer.py
+    uv run tools/srp_viewer.py
 
 The first run creates a `.venv` and installs the dependencies; afterwards it's
 incremental. Without `uv`, install `numpy`, `PyQt6`, `pyqtgraph`, and
@@ -27,6 +28,17 @@ must match the board's flashed config (`src/config/audio_config.h`) and your
 serial device. If the serial port can't be opened, the script prints what's
 wrong and exits; if it opens but no usable frames arrive, the status line says
 so. Both messages point back at those globals.
+
+## srp_viewer.py
+
+Live SRP map display for the `srp-phat` app: map power against azimuth, with a
+red line at the direction the board reported. The status line shows the packet
+counter, dropped packets, the board's peak and the viewer's own argmax of the
+map, which should agree.
+
+The board sends a 64-byte header ahead of every map (`srp_packet_t` in
+`src/apps/srp-phat/app_main.c`) carrying the grid, so only `PORT` and `BAUD`
+are local settings.
 
 ## logmel_viewer.py
 
