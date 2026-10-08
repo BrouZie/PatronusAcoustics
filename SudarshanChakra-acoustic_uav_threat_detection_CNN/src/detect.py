@@ -21,7 +21,7 @@ HOP = 512                    # hop size in samples between frames
 MIN_FREQ = 100                # Hz
 MAX_FREQ = 8000              # Hz
 FFT = 1024                    # FFT size used
-Q_SCALE = 2.00               # dequant: db = byte / Q_SCALE + Q_OFFSET
+Q_SCALE = 1.50               # dequant: db = byte / Q_SCALE + Q_OFFSET
 Q_OFFSET = -100.0
 THRESHOLD = 0.5
 

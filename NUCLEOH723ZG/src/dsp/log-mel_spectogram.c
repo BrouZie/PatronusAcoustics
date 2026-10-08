@@ -1,5 +1,6 @@
 #include "log-mel_spectogram.h"
 #include "arm_math.h"
+#include "mel_fbank.h"
 
 #include <stdint.h>
 
@@ -127,15 +128,29 @@ void mel_filterbank_init(void)
 	}
 }
 
+// OLD APPLY LOG-MEL
+// static void apply_logmel(float32_t* mel_out)
+// {
+// 	for (uint32_t mel_idx = 0; mel_idx < NUM_MEL_BANDS; ++mel_idx)
+// 	{
+// 		mel_filter_t* filter = &_mel_filters[mel_idx];
+// 		/* Compute mel-band energy as the weighted sum of the power spectrum. */
+// 		arm_dot_prod_f32(&_power_spectrum[filter->start_bin], filter->weights_addr, filter->num_bins, &mel_out[mel_idx]);
+// 		/* Convert mel-band energy to log10 scale; EPSILON prevents log10(0). */
+// 		mel_out[mel_idx] = 10.0f * log10f(mel_out[mel_idx] + EPSILON);
+// 	}
+// }
+
 static void apply_logmel(float32_t* mel_out)
 {
-	for (uint32_t mel_idx = 0; mel_idx < NUM_MEL_BANDS; ++mel_idx)
+	const float32_t* w = MEL_WEIGHTS;
+	for (uint32_t m = 0; m < NUM_MEL_BANDS; ++m)
 	{
-		mel_filter_t* filter = &_mel_filters[mel_idx];
-		/* Compute mel-band energy as the weighted sum of the power spectrum. */
-		arm_dot_prod_f32(&_power_spectrum[filter->start_bin], filter->weights_addr, filter->num_bins, &mel_out[mel_idx]);
-		/* Convert mel-band energy to log10 scale; EPSILON prevents log10(0). */
-		mel_out[mel_idx] = 10.0 * log10f(mel_out[mel_idx] + EPSILON);
+		float32_t energy = 0.0f;
+		if (MEL_COUNT[m])
+			arm_dot_prod_f32(&_power_spectrum[MEL_START[m]], (float32_t*)w, MEL_COUNT[m], &energy);
+		w += MEL_COUNT[m];
+		mel_out[m] = 10.0f * log10f(energy + EPSILON);
 	}
 }
 

@@ -100,7 +100,7 @@ void UART_DMA_start(uint32_t output_buffer, uint32_t size)
     HAL_MDMA_RegisterCallback(&USART_MDMA_HANDLE, HAL_MDMA_XFER_CPLT_CB_ID, &MDMA_transfer_complete);
 }
 
-void UART_MDMA_send_buffer(uint8_t* dtcm_block, uint32_t size)
+void UART_MDMA_send_buffer(const void* dtcm_block, uint32_t size)
 {
     uint8_t fill_idx = 1 - _dma_active_idx;
     while (_dma_busy && fill_idx == _dma_active_idx) { }

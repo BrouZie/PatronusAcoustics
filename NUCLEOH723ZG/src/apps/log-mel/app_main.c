@@ -23,8 +23,8 @@
 #define LOGMEL_FRAME_DTCM_BUF     ".dtcm_buf" // -> DTCMRAM
 #define LOGMEL_SPECTOGRAM_RAM_BUF ".d1_buf"   // -> RAM_D1
 #define LOGMEL_MAGIC              0x4C454D4C
-#define LOGMEL_Q_SCALE            1.5f      
-#define LOGMEL_Q_OFFSET           -100.0f    
+#define LOGMEL_Q_SCALE            1.5f
+#define LOGMEL_Q_OFFSET           -100.0f
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;       // LOGMEL_MAGIC

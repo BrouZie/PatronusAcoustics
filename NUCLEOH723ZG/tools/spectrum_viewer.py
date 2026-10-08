@@ -23,7 +23,7 @@ from pyqtgraph.Qt import QtCore
 # Config -- edit these to match the board's flashed audio_config.h and your
 # serial device.
 # ---------------------------------------------------------------------------
-RATE = 48000     # AUDIO_SAMPLE_RATE_HZ
+RATE = 16000     # AUDIO_SAMPLE_RATE_HZ
 FFT  = 1024      # SPECTRUM_FFT_SIZE
 MICS = 1         # AUDIO_MIC_COUNT
 PORT = "/dev/ttyACM0"
