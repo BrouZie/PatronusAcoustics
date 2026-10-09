@@ -83,10 +83,10 @@ static doa_t _peak(const srp_t *s)
 
     // azimuth major: dir_idx = az_idx * el_steps + el_idx
     return (doa_t) {
-        .az    = s->grid.az0 + (float32_t)(dir_idx / s->grid.el_steps) * s->grid.az_step,
-        .el    = s->grid.el0 + (float32_t)(dir_idx % s->grid.el_steps) * s->grid.el_step,
+        .az    = s->grid.az0 + ((float32_t)dir_idx / s->grid.el_steps) * s->grid.az_step,
+        .el    = s->grid.el0 + ((float32_t)dir_idx / s->grid.el_steps) * s->grid.el_step,
         .power = power,
-        .ratio = 0.0f, // TODO
+        .ratio = 0.0f, // TODO: add ratio
     };
 }
 
