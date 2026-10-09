@@ -53,7 +53,7 @@ class LogMelSpectrogram(nn.Module):
             f_min=float(f_min),
             f_max=float(f_max),
             power=2.0,  # Power spectrogram
-            center=True,
+            center=False,
             pad_mode="constant",
             norm=None,
             mel_scale="htk",
