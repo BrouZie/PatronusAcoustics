@@ -13,7 +13,7 @@
  * Hop_length given by number of new samples introduced between one window and the next
 */
 
-#define NUM_FRAMES    62
+#define NUM_FRAMES    61
 #define NUM_MEL_BANDS 128
 #define MIN_FREQUENCY 100
 #define MAX_FREQUENCY 8000

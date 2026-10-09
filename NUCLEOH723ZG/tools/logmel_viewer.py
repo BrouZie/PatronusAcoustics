@@ -45,7 +45,7 @@ IDLE_TICKS = 150            # warn after ~3 s with no packet
 # --- Fixed by the trained model. Must match src/dsp/log-mel_spectogram.c and
 # --- whatever produced the training set exactly, or the CNN sees a shape or
 # --- scale it was never trained on. Bump MAGIC if any of these change.
-FRAMES = 62                # rows in the image (time)
+FRAMES = 61                # rows in the image (time)
 BANDS = 128                   # columns in the image (mel bands)
 RATE = 16000                 # sample rate, Hz
 HOP = 512                    # hop size in samples between frames
