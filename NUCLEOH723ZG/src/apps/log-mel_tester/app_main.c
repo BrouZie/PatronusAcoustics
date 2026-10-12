@@ -19,9 +19,10 @@
 
 #define DTCM_WORDS RAM_WORDS * 2
 
-#define LOGMEL_MAGIC              0x4C454D4C
-#define LOGMEL_Q_SCALE            1.5f
-#define LOGMEL_Q_OFFSET           -100.0f
+#define LOGMEL_MAGIC    0x4C454D4C
+#define LOGMEL_Q_SCALE  1.5f
+#define LOGMEL_Q_OFFSET -100.0f
+#define NUM_FRAMES      61
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;       // LOGMEL_MAGIC

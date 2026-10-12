@@ -11,18 +11,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.model import get_model
 
+# Make sure these values match with log-mel configuratin on the STM and parameters used to train the CNN
+####################################################
+
 PORT = "/dev/ttyACM0"
 BAUD = 921600
+FRAMES = 61       # rows in the image (time)
+BANDS = 128       # columns in the image (mel bands)
+RATE = 16000      # sample rate, Hz
+HOP = 512         # hop size in samples between frames
+MIN_FREQ = 100    # Hz
+MAX_FREQ = 8000   # Hz
+FFT = 1024        # FFT size used
+Q_SCALE = 1.50    # dequant: db = byte / Q_SCALE + Q_OFFSET
+Q_OFFSET = -100.0 # db value of byte 0
 
-FRAMES = 62                # rows in the image (time)
-BANDS = 128                   # columns in the image (mel bands)
-RATE = 16000                 # sample rate, Hz
-HOP = 512                    # hop size in samples between frames
-MIN_FREQ = 100                # Hz
-MAX_FREQ = 8000              # Hz
-FFT = 1024                    # FFT size used
-Q_SCALE = 1.50               # dequant: db = byte / Q_SCALE + Q_OFFSET
-Q_OFFSET = -100.0
+####################################################
+
 THRESHOLD = 0.5
 
 MAGIC = 0x4C454D4C
@@ -32,14 +37,30 @@ HDR_SIZE = HDR.size                    # 8
 PACKET_SIZE = HDR_SIZE + FRAMES * BANDS
 
 def normalize(db, top_db=80.0):
-    """db: (FRAMES, BANDS) absolute dB -> (BANDS, FRAMES) in [0, 1]."""
-    db = db - db.max()
-    db = np.maximum(db, -top_db)
-    db = (db - db.min()) / (db.max() - db.min() + 1e-8)
-    return np.ascontiguousarray(db.T)          # mel bands on rows, like training
+    """
+    Convert a dequantised packet into the model's input image.
+
+    Args:
+        db:     (FRAMES, BANDS) absolute dB values from find_packet
+                (time on rows, mel bands on columns).
+        top_db: Dynamic range kept below the loudest pixel.
+
+    Returns:
+        (BANDS, FRAMES) float32 array in [0, 1], mel bands on rows.
+
+    Uses a fixed scale (peak -> 1.0, -top_db -> 0.0) instead of per-image
+    min-max. The model was trained on 1 s clips zero-padded to 2 s, so every
+    training image had a silent half that pinned its minimum at -top_db.
+    Live packets are 2 s of real audio, and the fixed scale reproduces that
+    value range.
+    """
+    db = np.maximum(db - db.max(), -top_db)
+    return np.ascontiguousarray(((db + top_db) / top_db).T)
 
 def load_model(model_path):
-    """Load and prepare model for inference."""
+    """
+    Load and prepare model for inference.
+    """
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found at {model_path}")
 
@@ -53,10 +74,11 @@ def load_model(model_path):
 
     return model, device
 
-
-
 def find_packet(buf):
-    """(seq, image) of the next complete packet in buf, or None."""
+    """
+    (seq, image) of the next complete packet in buf, or None.
+    MAGIC_BYTES need to match whats given in log_mel application.
+    """
     at = buf.find(MAGIC_BYTES)
     if at < 0:
         del buf[:-len(MAGIC_BYTES)]      # keep tail: magic may be split across reads
@@ -71,7 +93,9 @@ def find_packet(buf):
     return seq, image / Q_SCALE + Q_OFFSET
 
 def predict(model, device, image, threshold):
-    # x = torch.from_numpy(image)[None, None].to(device)
+    """
+    Predict class and probabilites.
+    """
     image = normalize(image)
     x = torch.from_numpy(image)[None, None].to(device)
     with torch.no_grad():
@@ -95,14 +119,10 @@ def print_alert(result, seq):
     else:
         print(f"[CLEAR] packet {seq}  safe: {p['safe']:.1%}")
 
-
-def debug_packet(model, device, image):
-    print(f"raw dB  min={image.min():.1f} max={image.max():.1f} "
-          f"mean={image.mean():.1f} std={image.std():.1f}")
-    raw_bytes = ((image - Q_OFFSET) * Q_SCALE).round()
-    print(f"bytes at 0: {(raw_bytes <= 0).mean():.1%}   at 255: {(raw_bytes >= 255).mean():.1%}")
-
-def detect_uart(model, device, serial_port, baudrate, idle_timeout=None):
+def detect(model, device, serial_port, baudrate, idle_timeout=None):
+    """
+    Full pipeline from receiving data to making a prediction 
+    """
     buf = bytearray()
     last_seq = None
     try:
@@ -119,7 +139,6 @@ def detect_uart(model, device, serial_port, baudrate, idle_timeout=None):
 
                     result = predict(model, device, image, THRESHOLD)
                     print_alert(result, seq)
-                    debug_packet(model, device, image)
                     if idle_timeout:
                         deadline = time.time() + idle_timeout
     except serial.SerialException as e:
@@ -131,4 +150,4 @@ def detect_uart(model, device, serial_port, baudrate, idle_timeout=None):
 if __name__ == "__main__":
 
     model, device = load_model(Config.MODEL_DIR / "best_model.pth")
-    detect_uart(model, device, PORT, BAUD) 
+    detect(model, device, PORT, BAUD) 
