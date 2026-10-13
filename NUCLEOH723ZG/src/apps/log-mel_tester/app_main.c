@@ -10,6 +10,18 @@
 #include <string.h>
 #include <stdbool.h>
 
+/*
+ * Sample data to log-mel spectogram output pipeline
+ *
+ *			  Send a .wav file to MCU over UART
+ *			                |
+ *			                V
+ * Rewritten version of ics52000_read since microphone is not included
+ *                          |
+ *                          V
+ *           Same pipeline as log-mel application
+ */
+
 #define RAM_BUF  ".d1_buf" // -> RAM_D1
 #define DTCM_BUF ".dtcm_buf" // -> DTCMRAM
 

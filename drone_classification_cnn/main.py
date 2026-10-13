@@ -61,40 +61,10 @@ def run_training():
     from src.train import run_training as train_pipeline
     return train_pipeline()
 
-
-def run_inference(audio_path: str, threshold: float = None):
-    """Run inference on audio file."""
-    from src.inference import analyze_file
-    threshold = threshold or Config.THREAT_CONFIDENCE_THRESHOLD
-    return analyze_file(audio_path, threshold=threshold)
-
-
-def run_demo():
-    """Run demonstration."""
-    from src.inference import demo_inference
-    return demo_inference()
-
-
-def print_banner():
-    """Print system banner."""
-    banner = """
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                                                              ║
-    ║   ███████╗██╗   ██╗██████╗  █████╗ ██████╗ ███████╗██╗  ██╗  ║
-    ║   ██╔════╝██║   ██║██╔══██╗██╔══██╗██╔══██╗██╔════╝██║  ██║  ║
-    ║   ███████╗██║   ██║██║  ██║███████║██████╔╝███████╗███████║  ║
-    ║   ╚════██║██║   ██║██║  ██║██╔══██║██╔══██╗╚════██║██╔══██║  ║
-    ║   ███████║╚██████╔╝██████╔╝██║  ██║██║  ██║███████║██║  ██║  ║
-    ║   ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ║
-    ║                        CHAKRA                                 ║
-    ║                                                              ║
-    ║          Acoustic UAV Threat Detection System                ║
-    ║              Defense-Grade AI Surveillance                   ║
-    ║                                                              ║
-    ╚══════════════════════════════════════════════════════════════╝
-    """
-    print(banner)
-
+def run_detection():
+    """Execute complete detection pipeline."""
+    from src.detect import run_detection as detection_pipeline
+    return detection_pipeline()
 
 def main():
     """Main entry point."""
@@ -106,7 +76,7 @@ Pipeline Commands:
 ------------------
   --train           Run complete training pipeline (ingest -> train -> evaluate)
   --ingest          Download and prepare dataset only
-  --detect FILE     Analyze audio file for threats
+  --detect          Analyze audio for threats
   --demo            Run demonstration with sample data
 
 Examples:
@@ -119,7 +89,7 @@ Examples:
 Configuration:
 --------------
   Edit configs/config.py to modify system parameters.
-        """,
+ """,
     )
 
     parser.add_argument(
@@ -134,20 +104,14 @@ Configuration:
     )
     parser.add_argument(
         "--detect",
-        type=str,
-        metavar="FILE",
-        help="Path to audio file for threat detection",
+        action="store_true",
+        help="Run live threat detection from UART stream",
     )
     parser.add_argument(
         "--threshold",
         type=float,
         default=None,
         help=f"Detection threshold (default: {Config.THREAT_CONFIDENCE_THRESHOLD})",
-    )
-    parser.add_argument(
-        "--demo",
-        action="store_true",
-        help="Run demonstration",
     )
     parser.add_argument(
         "--config",
@@ -157,9 +121,6 @@ Configuration:
 
     args = parser.parse_args()
 
-    # Print banner
-    print_banner()
-
     # Execute requested operation
     if args.config:
         Config.print_config()
@@ -167,6 +128,10 @@ Configuration:
     elif args.ingest:
         print("\n[MODE] Data Ingestion")
         run_data_ingestion()
+
+    elif args.detect:
+        print("[MODE] Detection Pipeline")
+        run_detection()
 
     elif args.train:
         print("\n[MODE] Training Pipeline")
@@ -179,14 +144,6 @@ Configuration:
         else:
             print("\n[ERROR] Dataset validation failed. Cannot proceed with training.")
             sys.exit(1)
-
-    elif args.detect:
-        print("\n[MODE] Threat Detection")
-        run_inference(args.detect, args.threshold)
-
-    elif args.demo:
-        print("\n[MODE] Demonstration")
-        run_demo()
 
     else:
         parser.print_help()

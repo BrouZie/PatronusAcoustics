@@ -5,6 +5,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 from src.data_loader import LogMelSpectrogram
 
+"""
+Exports all data required to recreate the mel filterbanks used during preprocessing to mel_fbank.h. Place the header in NUCLEOH723ZG/src/dsp/ and include it in log-mel_spectogram.c.
+
+Regenerate the header whenever the filter weights change.
+"""
+
 fb = LogMelSpectrogram().mel.mel_scale.fb.numpy().T   # (128 mels, 513 bins)
 
 starts, counts, weights = [], [], []

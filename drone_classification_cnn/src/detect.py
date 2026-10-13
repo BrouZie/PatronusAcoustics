@@ -11,30 +11,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.model import get_model
 
-# Make sure these values match with log-mel configuratin on the STM and parameters used to train the CNN
-####################################################
 
-PORT = "/dev/ttyACM0"
-BAUD = 921600
-FRAMES = 61       # rows in the image (time)
-BANDS = 128       # columns in the image (mel bands)
-RATE = 16000      # sample rate, Hz
-HOP = 512         # hop size in samples between frames
-MIN_FREQ = 100    # Hz
-MAX_FREQ = 8000   # Hz
-FFT = 1024        # FFT size used
-Q_SCALE = 1.50    # dequant: db = byte / Q_SCALE + Q_OFFSET
-Q_OFFSET = -100.0 # db value of byte 0
-
-####################################################
-
-THRESHOLD = 0.5
-
-MAGIC = 0x4C454D4C
-MAGIC_BYTES = struct.pack("<I", MAGIC)
+MAGIC_BYTES = struct.pack("<I", Config.MAGIC)
 HDR = struct.Struct("<II")             # magic, seq
 HDR_SIZE = HDR.size                    # 8
-PACKET_SIZE = HDR_SIZE + FRAMES * BANDS
+PACKET_SIZE = HDR_SIZE + Config.FRAMES * Config.N_MELS
 
 def normalize(db, top_db=80.0):
     """
@@ -89,8 +70,8 @@ def find_packet(buf):
     _, seq = HDR.unpack_from(buf)
     cells = np.frombuffer(bytes(buf[HDR_SIZE:PACKET_SIZE]), np.uint8)
     del buf[:PACKET_SIZE]
-    image = cells.reshape(FRAMES, BANDS).astype(np.float32)
-    return seq, image / Q_SCALE + Q_OFFSET
+    image = cells.reshape(Config.FRAMES, Config.N_MELS).astype(np.float32)
+    return seq, image / Config.Q_SCALE + Config.Q_OFFSET
 
 def predict(model, device, image, threshold):
     """
@@ -121,7 +102,7 @@ def print_alert(result, seq):
 
 def detect(model, device, serial_port, baudrate, idle_timeout=None):
     """
-    Full pipeline from receiving data to making a prediction 
+    Drone detection with model as parameter
     """
     buf = bytearray()
     last_seq = None
@@ -137,7 +118,7 @@ def detect(model, device, serial_port, baudrate, idle_timeout=None):
                         print(f"Sequence jump: {last_seq} -> {seq}")
                     last_seq = seq
 
-                    result = predict(model, device, image, THRESHOLD)
+                    result = predict(model, device, image, Config.THREAT_CONFIDENCE_THRESHOLD)
                     print_alert(result, seq)
                     if idle_timeout:
                         deadline = time.time() + idle_timeout
@@ -146,8 +127,9 @@ def detect(model, device, serial_port, baudrate, idle_timeout=None):
     except KeyboardInterrupt:
         print("Stopped.")
 
+def run_detection():
+    model, device = load_model(Config.MODEL_DIR / "best_model.pth")
+    detect(model, device, Config.PORT, Config.BAUDRATE) 
 
 if __name__ == "__main__":
-
-    model, device = load_model(Config.MODEL_DIR / "best_model.pth")
-    detect(model, device, PORT, BAUD) 
+    run_detection()

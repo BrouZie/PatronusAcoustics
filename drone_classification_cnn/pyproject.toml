@@ -1,9 +1,10 @@
 [project]
-name = "sudarshanchakra-acoustic-uav-threat-detection-cnn"
+name = "drone_classification_cnn"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
+	{ name = "KasNgB", email = "kasper@skobba.no" },
     { name = "BrouZie", email = "sokrates.kjoelner@gmail.com" }
 ]
 requires-python = ">=3.13"
@@ -25,12 +26,8 @@ dependencies = [
     "triton-rocm; sys_platform == 'linux'",
 ]
 
-[project.scripts]
-sudarshanchakra-acoustic-uav-threat-detection-cnn = "sudarshanchakra_acoustic_uav_threat_detection_cnn:main"
-
-[build-system]
-requires = ["uv_build>=0.12.18,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv]
+package = false
 
 # AMD GPU (ROCm) builds of PyTorch on Linux; PyPI's Linux wheels are CUDA-only
 [[tool.uv.index]]

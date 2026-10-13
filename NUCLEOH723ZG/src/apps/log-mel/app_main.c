@@ -22,10 +22,10 @@
 
 #define LOGMEL_FRAME_DTCM_BUF     ".dtcm_buf" // -> DTCMRAM
 #define LOGMEL_SPECTOGRAM_RAM_BUF ".d1_buf"   // -> RAM_D1
-#define LOGMEL_MAGIC              0x4C454D4C
-#define LOGMEL_Q_SCALE            1.5f
-#define LOGMEL_Q_OFFSET           -100.0f
-#define NUM_FRAMES    61
+#define LOGMEL_MAGIC               0x4C454D4C
+#define LOGMEL_Q_SCALE             1.5f
+#define LOGMEL_Q_OFFSET            -100.0f
+#define NUM_FRAMES                 61
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;       // LOGMEL_MAGIC
@@ -75,19 +75,19 @@ void app_main(void)
 	        uint8_t* out = _logmel_frame[_active_write_buf];
             uint8_t* cells;
 
-		          if (frame_idx == 0) {
-		              logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
-		              *hdr = (logmel_header_t){
-		                  .magic = LOGMEL_MAGIC,
-		                  .seq   = seq,
-		              };
-		              cells = _logmel_first_frame + sizeof(logmel_header_t);
+			if (frame_idx == 0) {
+				logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
+				*hdr = (logmel_header_t){
+					.magic = LOGMEL_MAGIC,
+					.seq   = seq,
+				};
+				cells = _logmel_first_frame + sizeof(logmel_header_t);
 				for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
 					cells[b] = quantize_db(_logmel_frame_f32[b]);
 
 				UART_MDMA_send_buffer(_logmel_first_frame, sizeof(logmel_header_t) + NUM_MEL_BANDS);
-		          } else {
-		              cells = out;
+		    } else {
+		    	cells = out;
 				for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
 					cells[b] = quantize_db(_logmel_frame_f32[b]);
 
