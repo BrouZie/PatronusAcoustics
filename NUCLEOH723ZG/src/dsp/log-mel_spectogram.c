@@ -1,46 +1,16 @@
 #include "log-mel_spectogram.h"
 #include "arm_math.h"
+#include "mel_fbank.h"
 
-#include <stdint.h>
-
-#define EPSILON              1.0e-6f 
-#define MEL_WEIGHT_POOL_SIZE 1200U  
-/*
- * Weight pool size must be hardcoded: filters aren't built yet when this
- * array is declared, so the real total (see get_mel_weight_pool_size) isn't
- * known until after mel_filterbank_init() runs.
- *
- * Required_size = (bin_points[N] + bin_points[N+1]) - (bin_points[0] + bin_points[1]) + N
- * where N = NUM_MEL_BANDS.
- *  
- * At 16000 Hz, 128 bands, 100-8000 Hz: calculated 1128, sized to 1200 for margin.
- * Recompute if sample rate, band count, or frequency range changes.
- */
-
-typedef struct {
-    uint16_t   start_bin;
-    uint16_t   num_bins;
-    float32_t* weights_addr; // Pointer to where weights data start
-} mel_filter_t;
-
-static mel_filter_t _mel_filters[NUM_MEL_BANDS];
-static float32_t    _mel_weight_pool[MEL_WEIGHT_POOL_SIZE]; // Store all Mel weights contiguously to avoid per-filter padding
-static float32_t    _power_spectrum[SPECTRUM_BINS];
-
+#define EPSILON 1.0e-10f
 
 /*
- * Ground truth for MEL_WEIGHT_POOL_SIZE. If overflow is suspected (or after
- * changing sample rate / band count / frequency range), set the define well
- * above the expected value, call this after mel_filterbank_init(), print the
- * result, then set MEL_WEIGHT_POOL_SIZE to that value plus some margin.
+ * Mel filterbank coefficients, exported from the filterbank used to train
+ * the CNN. All filter data lives in mel_fbank.h; regenerate it if the training
+ * parameters change.
  */
-uint32_t get_mel_weight_pool_size(void)
-{	
-	uint32_t total = 0;
-	for (uint32_t i = 0; i < NUM_MEL_BANDS; ++i)
-		total += _mel_filters[i].num_bins;
-	return total;
-}
+
+static float32_t _power_spectrum[SPECTRUM_BINS];
 
 static void get_power_magnitudes(const float32_t (*spec)[SPECTRUM_FLOATS])
 {
@@ -54,88 +24,16 @@ static void get_power_magnitudes(const float32_t (*spec)[SPECTRUM_FLOATS])
 	}
 }
 
-static float32_t hz_to_mel(float32_t freq)
-{
-	return 2595 * log10f(1 + freq/700.0f);
-}
-
-static float32_t mel_to_hz(float32_t mel)
-{
-	return 700.0f * (powf(10.0f, (float32_t)mel / 2595.0f) - 1.0f);
-}
-
-void mel_filterbank_init(void)
-{
-	float32_t min_mel = hz_to_mel(MIN_FREQUENCY);
-	float32_t max_mel = hz_to_mel(MAX_FREQUENCY);
-	float32_t mel_step_size = (max_mel - min_mel) / (float32_t)(NUM_MEL_BANDS + 1U);
-	float32_t bin_spacing = (float32_t)AUDIO_SAMPLE_RATE_HZ / (float32_t)SPECTRUM_FFT_SIZE;
-
-	float32_t hz_points[NUM_MEL_BANDS + 2U];
-	uint16_t bin_points[NUM_MEL_BANDS + 2U];
-
-	for (uint8_t i = 0; i < NUM_MEL_BANDS + 2U; ++i)
-	{
-		hz_points[i] = mel_to_hz(min_mel + (float32_t)i * mel_step_size);
-		/* Floor not round maps each point to bin at/just below,
-		 * so that shared edges between adjecent filters stay aligned */
-		bin_points[i] = (uint16_t)floorf(hz_points[i] / bin_spacing);
-	}
-
-	float32_t* pool_ptr = _mel_weight_pool;
-
-	for (uint32_t mel_band_idx = 0; mel_band_idx < NUM_MEL_BANDS; ++mel_band_idx)
-	{
-		uint16_t bin_left = bin_points[mel_band_idx];
-		uint16_t bin_center = bin_points[mel_band_idx + 1U];
-		uint16_t bin_right = bin_points[mel_band_idx + 2U];
-
-		if (bin_center <= bin_left)   { bin_center = bin_left + 1U; }
-		if (bin_right  <= bin_center) { bin_right  = bin_center + 1U; }
-
-		/* Number of fft bins touched by the triangular filter */
-		uint16_t num_bins = bin_right - bin_left + 1U;
-
-		mel_filter_t* filter = &_mel_filters[mel_band_idx];
-		filter->start_bin    = bin_left;
-		filter->num_bins     = num_bins;
-		filter->weights_addr = pool_ptr;
-		pool_ptr += num_bins; // Move pointer to address of next filter
-
-		/* Calculate weight for bins */
-        for (uint16_t fft_index = 0; fft_index < num_bins; ++fft_index)
-        {
-            uint16_t bin = bin_left + fft_index;
-            float32_t weight;
-
-			/* Linearly ramp this bin's weight: 0 at the filter's outer edges, 1 at its
-			 * center — rising edge (bin_left -> bin_center), falling edge (bin_center -> bin_right) */
-            if (bin <= bin_center)
-            {
-                weight = (bin_center > bin_left)
-                    ? (float32_t)(bin - bin_left) / (float32_t)(bin_center - bin_left)
-                    : 1.0f;
-            }
-            else
-            {
-                weight = (bin_right > bin_center)
-                    ? (float32_t)(bin_right - bin) / (float32_t)(bin_right - bin_center)
-                    : 1.0f;
-            }
-            filter->weights_addr[fft_index] = weight;
-        }
-	}
-}
-
 static void apply_logmel(float32_t* mel_out)
 {
-	for (uint32_t mel_idx = 0; mel_idx < NUM_MEL_BANDS; ++mel_idx)
+	const float32_t* w = MEL_WEIGHTS;
+	for (uint32_t m = 0; m < NUM_MEL_BANDS; ++m)
 	{
-		mel_filter_t* filter = &_mel_filters[mel_idx];
-		/* Compute mel-band energy as the weighted sum of the power spectrum. */
-		arm_dot_prod_f32(&_power_spectrum[filter->start_bin], filter->weights_addr, filter->num_bins, &mel_out[mel_idx]);
-		/* Convert mel-band energy to log10 scale; EPSILON prevents log10(0). */
-		mel_out[mel_idx] = log10f(mel_out[mel_idx] + EPSILON);
+		float32_t energy = 0.0f;
+		if (MEL_COUNT[m])
+			arm_dot_prod_f32(&_power_spectrum[MEL_START[m]], (float32_t*)w, MEL_COUNT[m], &energy);
+		w += MEL_COUNT[m];
+		mel_out[m] = 10.0f * log10f(energy + EPSILON);
 	}
 }
 

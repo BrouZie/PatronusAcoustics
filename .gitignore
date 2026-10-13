@@ -17,6 +17,7 @@ uv.lock
 
 # Output
 output/
+DroneAudioDataset/
 *.npz
 
 # Simulation results cache (regenerable, keyed by config hash)

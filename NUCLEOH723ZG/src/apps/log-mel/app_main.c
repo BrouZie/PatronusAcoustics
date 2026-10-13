@@ -22,9 +22,10 @@
 
 #define LOGMEL_FRAME_DTCM_BUF     ".dtcm_buf" // -> DTCMRAM
 #define LOGMEL_SPECTOGRAM_RAM_BUF ".d1_buf"   // -> RAM_D1
-#define LOGMEL_MAGIC              0x4C454D4C
-#define LOGMEL_Q_SCALE            2.83f      // ~0.35 dB/step over ~90 dB range — tune to your data
-#define LOGMEL_Q_OFFSET           -80.0f     // dB value that maps to byte 0
+#define LOGMEL_MAGIC               0x4C454D4C
+#define LOGMEL_Q_SCALE             1.5f
+#define LOGMEL_Q_OFFSET            -100.0f
+#define NUM_FRAMES                 61
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;       // LOGMEL_MAGIC
@@ -59,7 +60,6 @@ void app_main(void)
 	UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
     spectrum_init();
 	mel_filterbank_init();
-	uint32_t pool = get_mel_weight_pool_size();
 	ics52000_start();
 
 	uint16_t frame_idx = 0;
@@ -75,19 +75,19 @@ void app_main(void)
 	        uint8_t* out = _logmel_frame[_active_write_buf];
             uint8_t* cells;
 
-		          if (frame_idx == 0) {
-		              logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
-		              *hdr = (logmel_header_t){
-		                  .magic = LOGMEL_MAGIC,
-		                  .seq   = seq,
-		              };
-		              cells = _logmel_first_frame + sizeof(logmel_header_t);
+			if (frame_idx == 0) {
+				logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
+				*hdr = (logmel_header_t){
+					.magic = LOGMEL_MAGIC,
+					.seq   = seq,
+				};
+				cells = _logmel_first_frame + sizeof(logmel_header_t);
 				for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
 					cells[b] = quantize_db(_logmel_frame_f32[b]);
 
 				UART_MDMA_send_buffer(_logmel_first_frame, sizeof(logmel_header_t) + NUM_MEL_BANDS);
-		          } else {
-		              cells = out;
+		    } else {
+		    	cells = out;
 				for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
 					cells[b] = quantize_db(_logmel_frame_f32[b]);
 
