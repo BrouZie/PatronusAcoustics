@@ -1,5 +1,6 @@
 #include "log-mel_spectogram.h"
 #include "arm_math.h"
+#include "audio_config.h"
 #include "mel_fbank.h"
 
 #define EPSILON 1.0e-10f
@@ -41,5 +42,4 @@ void get_logmel_frame(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* mel_o
 {
 	get_power_magnitudes(spec);
 	apply_logmel(mel_out);
-
 }

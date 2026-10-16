@@ -21,7 +21,7 @@
 // --------- Tunables ---------
 
 #ifndef AUDIO_MIC_COUNT
-#define AUDIO_MIC_COUNT 2
+#define AUDIO_MIC_COUNT 5
 #endif
 
 #ifndef AUDIO_SAMPLE_RATE_HZ

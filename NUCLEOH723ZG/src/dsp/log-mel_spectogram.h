@@ -18,6 +18,7 @@
 #define MAX_FREQUENCY 8000
 
 void mel_filterbank_init(void);
+
 void get_logmel_frame(const float32_t (*spec)[SPECTRUM_FLOATS], float32_t* mel_out);
 uint32_t get_mel_weight_pool_size(void);
 
