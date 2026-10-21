@@ -101,7 +101,7 @@ void app_main()
 	HAL_UART_Receive_DMA(&huart3, (uint8_t*)_rx_ram, sizeof(_rx_ram));
 	spectrum_init();
 	console_init();
-	mel_filterbank_init();
+	// mel_filterbank_init();
 
 	uint16_t frame_idx = 0;
 	uint32_t seq       = 0;
@@ -117,7 +117,7 @@ void app_main()
 				frame[ch] = &_rx_overlap[ch][_frame_start];
 
 			spectrum_compute(frame, &spectrum);
-			get_logmel_frame(spectrum, _logmel_frame_f32);
+			get_logmel_frame(&spectrum[0], _logmel_frame_f32);
 
 	        uint8_t* out = _logmel_frame[_active_write_buf];
             uint8_t* cells;
@@ -143,6 +143,5 @@ void app_main()
 			}
 			if (++frame_idx == NUM_FRAMES) { frame_idx = 0; seq++; }
 		}
-
 	}
 }

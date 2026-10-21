@@ -59,7 +59,7 @@ void app_main(void)
 	const float32_t (*spectrum)[SPECTRUM_FLOATS];
 	UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
     spectrum_init();
-	mel_filterbank_init();
+	// mel_filterbank_init();
 	ics52000_start();
 
 	uint16_t frame_idx = 0;
@@ -70,7 +70,8 @@ void app_main(void)
         if (ics52000_read(frame))
         {
             spectrum_compute(frame, &spectrum);
-			get_logmel_frame(spectrum, _logmel_frame_f32);
+			// Only data from one mic is needed to calculate spectogram
+			get_logmel_frame(&spectrum[0], _logmel_frame_f32);
 
 	        uint8_t* out = _logmel_frame[_active_write_buf];
             uint8_t* cells;
