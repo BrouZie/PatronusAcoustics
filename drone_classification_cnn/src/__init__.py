@@ -6,7 +6,6 @@ Source Package
 from .data_loader import DroneAudioDataset, get_data_loaders
 from .model import DroneDetectorCNN, get_model
 from .train import Trainer
-from .inference import ThreatDetector
 
 __all__ = [
     "DroneAudioDataset",
@@ -14,5 +13,4 @@ __all__ = [
     "DroneDetectorCNN",
     "get_model",
     "Trainer",
-    "ThreatDetector",
 ]

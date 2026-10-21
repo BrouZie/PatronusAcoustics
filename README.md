@@ -1,4 +1,4 @@
-# Patronus Acoustics
+# Patronus Acoustics 
 
 Passive acoustic UAV detection. Microphone-array stations listen for drones,
 estimate a bearing, and stream features to a C2 system that classifies and
@@ -31,8 +31,9 @@ a 3D estimate by triangulating station bearings.
 | GPS (u-blox NEO-7M GNSS?) | PPS output for sub-ms cross-station sync, no custom PCB needed. |
 
 > Hardware specifications are not finalized and may change over time
+[hardware prototype 1](docs/hardware.md)
 
-## Layout
+## Software
 
 ```
 NUCLEOH723ZG/   Current station firmware (STM32H723, CMake + CMSIS-DSP)
@@ -46,6 +47,8 @@ project before the MCU, mics and other parts arrived. It was used to explore
 array configurations and how far away a drone frequency can be picked up (inside
 the simulation), however its results should not be considered valid or reliable.
 It is not part of the system.
+
+[software prototype 1](docs/software.md)
 
 ## Status
 
