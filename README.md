@@ -27,7 +27,7 @@ a 3D estimate by triangulating station bearings.
 | Part | Why |
 |---|---|
 | Microphone | Passive sensor used to calculate DOA, and classification using a NN on microphone data |
-| Microcontroller | All local calculations happens on the MCU (Data processing, SRP-PAHT) |
+| Microcontroller | All local calculations happens on the MCU (Data processing, SRP-PHAT) |
 | GPS | For station positions and timing when incorperating multiple stations |
 
 #### [Hardware prototype 1](docs/hardware.md)

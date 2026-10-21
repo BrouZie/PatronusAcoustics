@@ -4,7 +4,7 @@
 ## Layout
 
 ```
-docs/                     All relecant documents including md
+docs/                     All relevant documents including md
 drone_classification_cnn/ CNN pipeline (data_ingestion, train, model, detect)
 NUCLEOH723ZG/             Current station firmware (STM32H723, CMake + CMSIS-DSP)
 ```
@@ -29,7 +29,7 @@ x86_sandbox/ Code made to run on x86 for rapid testing and tweaking
 |------|-------------|
 | **ics5200** | Read raw sensor data from microphone, output buffer with 50% overlapping data |
 | **spectrum** | Applies hann windowing and Fast Fourier Transform |
-| **srp-phat** | Uses SRP-PAHT algorithm to detect DOA (Direction Of Arrival) |
+| **srp-phat** | Uses SRP-PHAT algorithm to detect DOA (Direction Of Arrival) |
 | **log-mel** | Converts data to log-mel spectogram using filterbank weights from `mel-fbank.h` |
 | **console** | Transfers the data over uart to external pc. |
 
@@ -51,5 +51,5 @@ src/     Files needed for data_ingestion, preprocesing, training, detection
 |------|-------------|
 | **data_ingestion** | Collects data for training |
 | **data_loader** | Preprocessing step turning .wav data to log-mel spectograms |
-| **train** | Trains model with specifications set in `conifgs/config.py` |
+| **train** | Trains model with specifications set in `configs/config.py` |
 | **detect** | Receives log-mel spectogram over UART which the model uses to predict drone / no drone |
