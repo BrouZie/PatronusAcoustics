@@ -13,5 +13,4 @@ __all__ = [
     "DroneDetectorCNN",
     "get_model",
     "Trainer",
-    "ThreatDetector",
 ]

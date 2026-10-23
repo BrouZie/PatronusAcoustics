@@ -4,7 +4,7 @@ Passive acoustic UAV detection. Microphone-array stations listen for drones,
 estimate a bearing, and stream features to a C2 system that classifies and
 locates the target.
 
-## How it works
+## Intended structure for final version
 
 A station is two concentric UCA microphone rings (with different diameters)
 separated along the boresight axis. The rings give azimuth directionality; the
@@ -26,39 +26,39 @@ a 3D estimate by triangulating station bearings.
 
 | Part | Why |
 |---|---|
-| ICS-52000 on custom breakout | Built for arrays: shared clock/data over TDM, 65 dB SNR, PCM out (no PDM filtering cost). Custom PCB keeps array geometry flexible. |
-| NUCLEO-H723ZG | SAI with 16-slot TDM, onboard Ethernet, cheap, proven for this workload. |
-| GPS (u-blox NEO-7M GNSS?) | PPS output for sub-ms cross-station sync, no custom PCB needed. |
+| Microphone | Passive sensor used to calculate DOA, and classification using a NN on microphone data |
+| Microcontroller | All local calculations happens on the MCU (Data processing, SRP-PHAT) |
+| GPS | For station positions and timing when incorperating multiple stations |
 
-> Hardware specifications are not finalized and may change over time
+#### [Hardware prototype 1](docs/hardware.md)
 
-## Layout
+## Software
 
-```
-NUCLEOH723ZG/   Current station firmware (STM32H723, CMake + CMSIS-DSP)
-teensy/         Superseded Teensy 4.1 prototype. Never got far; kept only as reference.
-py-simulation/  See below.
-about/          Project presentation and notes
-```
+Main software pipeline
 
-`py-simulation/` is purely vibe-coded throwaway code used to test the waters of the
-project before the MCU, mics and other parts arrived. It was used to explore
-array configurations and how far away a drone frequency can be picked up (inside
-the simulation), however its results should not be considered valid or reliable.
-It is not part of the system.
 
-## Status
+| Step | Description |
+|------|-------------|
+| **Read data** | Read raw sensor data from microphone, and GPS module. |
+| **Data processing** | Process data with FFT(Fast Fourier Transform) |
+| **Classification** | Transform data to format best suited for machine learning |
+| **Localization** | Implement algorithm for calculating DOA of sound |
+| **Transfer** | Transfer processed data to external computer | 
+| **Machine learning** | Use machine learning to classify sound | 
+| **Triangulating** | Combine localization and gps data to triangulate pos| 
+
+
+#### [Software prototype 1](docs/software.md)
+
+## Status (Prototype 1)
 
 We are currently at **single-station bring-up**:
 
-- **Mics:** up to 5 physically on hand; the SAI TDM path is built for 8 slots.
-  Mic count is a build-time knob (`-DAUDIO_MIC_COUNT=...`).
-- **Log-mel:** working end to end - TDM capture → FFT → log-mel frames.
-- **SRP-PHAT:** first implementation is almost finalized.
-- **Transport:** no Ethernet/C2 setup yet. Frames go out over USART to host
-  viewers in `NUCLEOH723ZG/tools/`.
-- **GNSS:** no GPS module yet, so no PPS and no cross-station time sync.
-- **Array:** Simple 1D array with four mic slots - concentric UCA ring is yet to
-  be made
-
-The design is not set in stone and will evolve.
+- **Mics:** Up to 5 physically on hand.
+- **Array:** Simple 1D array with five mic slots - concentric UCA ring
+- **GNSS:** No GPS module yet, so no PPS and no cross-station time sync.
+- **Classification:** Log-mel format working end to end - TDM capture → FFT → log-mel frames.
+- **Localization:** SRP-PHAT is algorithm of choice, first implementation is almost finalized.
+- **Transfer:** No Ethernet/C2 setup yet. Frames go out over USART to host.
+- **Machine learning** CNN pipeline from [kbhujbal](https://github.com/kbhujbal/SudarshanChakra-acoustic_uav_threat_detec)
+- **Triangulating** No triangulating since we only have one station.
