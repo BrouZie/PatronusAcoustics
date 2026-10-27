@@ -1,8 +1,7 @@
 #include "platform.h"
 #include "dsp.h"
 
-#include <stdint.h>
-#include <stdio.h>
+#include "stdio.h"
 
 global rng_t R;
 global AudioViewFrame View;
@@ -45,11 +44,11 @@ int main()
 
     while (!quit)
     {
-        if (do_something % 100 == 0)
-        {
-            SourceDirection.azimuth += 0.1f;
-            SourceDirection.elevation += 0.1f;
-        }
+        // if (do_something % 100 == 0)
+        // {
+        //     SourceDirection.azimuth += 0.1f;
+        //     SourceDirection.elevation += 0.1f;
+        // }
         populate_frame(&R, &View, MicPositions, SourceDirection);
         dsp_compute_spectrum(View.frame, &Prev, &Spec);
 

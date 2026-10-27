@@ -1,11 +1,11 @@
 #ifndef ICS52000_H
 #define ICS52000_H
 
+#include "random.h"
+#include "arm_math.h"
+
 #include <stdint.h>
 #include <stdbool.h>
-#include "random.h"
-
-#include "arm_math.h"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
@@ -15,6 +15,12 @@
 
 typedef float float32_t;
 typedef uint32_t bool32;
+typedef int16_t sample_t;
+
+#define SCALING_FACTOR(type) _Generic((type){0},            \
+                                      int16_t:   INT16_MAX, \
+                                      int32_t:   INT32_MAX, \
+                                      float32_t: 1)
 
 //-----------------------
 //   audio_config.h
@@ -49,10 +55,8 @@ typedef struct
 
 typedef struct
 {
-    // TODO(sok): change to int16_t/uint16_t
-    // when MDMA setup is completed
     // WARN: This motherfucker is interleaved
-    float32_t pcm[ICS_AUDIO_SAMPLES][ICS_MIC_COUNT];
+    sample_t pcm[ICS_AUDIO_SAMPLES][ICS_MIC_COUNT];
 } AudioFrame;
 
 typedef struct
@@ -64,5 +68,4 @@ typedef struct
 bool32 populate_frame(rng_t* r, AudioViewFrame* view, MicArray array, AngleDeg direction);
 
 // TODO(sok): Startup of WS should be 300 ms!
-//
 #endif

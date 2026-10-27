@@ -1,7 +1,7 @@
 #include "dsp.h"
-#include "platform.h"
 
 #include "mel_fbank.h"
+#include "platform.h"
 
 #define SRP_BETA 0.7f    // yields better results between 0.6 - 0.8 (source: trust me bro)
 #define SRP_EPS  1e-12f  // TODO: Make it relative to running magnitude scale
@@ -38,8 +38,9 @@ void dsp_compute_spectrum(const AudioFrame* frame, PrevAudioFrame* prev, FFT_Spe
     {
         for (uint32_t sample_idx = 0; sample_idx < AUDIO_SAMPLES; ++sample_idx)
         {
-            spec->scratch[sample_idx]                 = prev->pcm[mic_idx][sample_idx];
-            spec->scratch[AUDIO_SAMPLES + sample_idx] = frame->pcm[sample_idx][mic_idx];
+            uint32_t new_half = AUDIO_SAMPLES + sample_idx;
+            spec->scratch[sample_idx] = (float32_t)prev->pcm[mic_idx][sample_idx] / (float32_t)SCALING_FACTOR(sample_t);
+            spec->scratch[new_half]   = (float32_t)frame->pcm[sample_idx][mic_idx] / (float32_t)SCALING_FACTOR(sample_t);
 
             // Save frame for next iteration
             prev->pcm[mic_idx][sample_idx] = frame->pcm[sample_idx][mic_idx];
