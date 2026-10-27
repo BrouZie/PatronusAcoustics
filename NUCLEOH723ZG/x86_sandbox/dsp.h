@@ -7,7 +7,7 @@
 enum
 {
     DSP_COMPLEX_BINS = AUDIO_SAMPLES + 1,
-    DSP_BUFFER_LEN      = AUDIO_SAMPLES * 2,
+    DSP_BUFFER_LEN   = AUDIO_SAMPLES * 2,
     NUM_MIC_PAIRS    = (MIC_COUNT * (MIC_COUNT - 1) / 2),
 };
 
@@ -36,7 +36,7 @@ enum
 // Structs for FFT spectrum and general DSP 
 typedef struct
 {
-    float32_t pcm[MIC_COUNT][AUDIO_SAMPLES];
+    sample_t pcm[MIC_COUNT][AUDIO_SAMPLES];
 } PrevAudioFrame;
 
 typedef struct
