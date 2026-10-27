@@ -20,21 +20,18 @@ add_subdirectory(../CMSIS-DSP/Source bin_dsp)
 target_compile_definitions(CMSISDSP PUBLIC __GNUC_PYTHON__)
 set_target_properties(CMSISDSP PROPERTIES SYSTEM ON)   # no -Wconversion noise from CMSIS headers
 
-# The firmware's portable DSP code (src/dsp) + audio_config.h (src/config)
-file(GLOB DSP_SRC CONFIGURE_DEPENDS ../src/dsp/*.c)
-add_library(dsp STATIC ${DSP_SRC})
-target_include_directories(dsp PUBLIC ../src/dsp ../src/config ../src/types)
-target_link_libraries(dsp PUBLIC CMSISDSP m)
-
-add_executable(srp
-    srp.c
+add_executable(x86
+    platform.c
+    main.c
+    dsp.c
 )
 
-target_link_libraries(srp PRIVATE
-    dsp
+target_link_libraries(x86 PRIVATE
+    CMSISDSP
+    m
 )
 
-target_compile_options(srp PRIVATE
+target_compile_options(x86 PRIVATE
     -Wall
     -Wextra
     -Wconversion
