@@ -23,5 +23,8 @@ DroneAudioDataset/
 # Simulation results cache (regenerable, keyed by config hash)
 py-simulation/results/cache/
 
+# Data stored locally
+data/
+
 # Block inclusion of reference directory
 stm32/

@@ -32,7 +32,7 @@ class Config:
     DATASET_NAME     = "DroneAudioDataset"
 
     # ===========================================
-    # DATA Transfer 
+    # DATA Transfer
     # ===========================================
     PORT     = "/dev/ttyACM0"
     BAUDRATE = 921600
@@ -93,6 +93,13 @@ class Config:
     CLASS_NAMES  = ["Safe", "Threat"]
     SAFE_LABEL   = 0
     THREAT_LABEL = 1
+
+    # ===========================================
+    # UNPACKING PARQUET DRONE AUDIO DATASET
+    # ===========================================
+    INPUT_PATH  = "data/geronimobasso_drone-audio-detection-samples"  # From ROOT of drone_classification_cnn
+    OUTPUT_PATH = "data/geronimobasso_drone-audio-detection-samples" # From ROOT of drone_classification_cnn
+    
 
     # ===========================================
     # SYSTEM CONFIGURATION
