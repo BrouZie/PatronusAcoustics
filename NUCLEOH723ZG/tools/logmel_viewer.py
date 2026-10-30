@@ -33,6 +33,7 @@ from pyqtgraph.Qt import QtCore
 
 # --- Config: serial device and display preferences.
 PORT = "/dev/ttyACM0"
+# PORT = "/tmp/ttySIM0"
 BAUD = 921600
 
 SECONDS_SHOWN = 12.0        # width of the scrolling view
@@ -59,8 +60,8 @@ Q_OFFSET = -80.0
 
 MAGIC = 0x4C454D4C
 MAGIC_BYTES = struct.pack("<I", MAGIC)
-HDR = struct.Struct("<II")             # magic, seq
-HDR_SIZE = HDR.size                    # 8
+HDR = struct.Struct("<IIff")           # magic, seq, azimuth, elevation
+HDR_SIZE = HDR.size                    # 16
 PACKET_SIZE = HDR_SIZE + FRAMES * BANDS
 
 port = None
@@ -88,7 +89,7 @@ def find_packet():
         del buf[:at]
         if len(buf) < HDR_SIZE:
             return None
-        magic, seq = HDR.unpack_from(buf)
+        magic, seq, _, _ = HDR.unpack_from(buf)
         if magic != MAGIC:
             start = len(MAGIC_BYTES)         # false match, look past it
             continue
