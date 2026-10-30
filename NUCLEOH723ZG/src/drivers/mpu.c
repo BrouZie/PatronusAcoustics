@@ -1,7 +1,8 @@
 #include "mpu.h"
+#include "types.h"
 
 // Smallest power-of-two region that covers the buffer, as an MPU size code
-static inline uint8_t _mpu_size(uint32_t bytes)
+internal inline uint8_t mpu_size(uint32_t bytes)
 {
     uint32_t size = 32;
 
@@ -15,9 +16,9 @@ static inline uint8_t _mpu_size(uint32_t bytes)
  * and the MDMA see the same bytes the CPU would. Note the region is rounded up
  * to a power of two -- the linker script must pad .d1_buf to match so no other
  * data falls inside it. */
-void _mpu_configure(uint32_t* memory_address, uint32_t size_bytes)
+void configure_mpu(uint32_t* base_address, uint32_t size_bytes)
 {
-	static uint8_t mpu_region_number = 0x00;
+	local_persist uint8_t mpu_region_number = 0x00;
 
     MPU_Region_InitTypeDef r = { 0 };
 
@@ -25,8 +26,8 @@ void _mpu_configure(uint32_t* memory_address, uint32_t size_bytes)
 
     r.Enable           = MPU_REGION_ENABLE;
     r.Number           = mpu_region_number;
-    r.BaseAddress      = (uint32_t)memory_address;
-    r.Size             = _mpu_size(size_bytes);
+    r.BaseAddress      = (uint32_t)base_address;
+    r.Size             = mpu_size(size_bytes);
     r.SubRegionDisable = 0x0;
     r.TypeExtField     = MPU_TEX_LEVEL1;
     r.AccessPermission = MPU_REGION_FULL_ACCESS;
