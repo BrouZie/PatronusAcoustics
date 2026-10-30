@@ -28,7 +28,7 @@
 
 #define OUTPUT_BUF_SIZE SPECTRUM_FLOATS
 
-#define USART_MDMA_HANDLE hmdma_mdma_channel1_sw_0
+#define USART_MDMA_HANDLE hmdma_mdma_channel0_sw_0
 #define USART_DMA_HANDLE hdma_usart3_tx
 
 // Output buffer and flags
@@ -94,7 +94,7 @@ void UART_DMA_start(uint32_t output_buffer, uint32_t size)
 	_output_buffer[1] = output_buffer + size;
 	_output_buffer_size = size;
 	
-    _mpu_configure((uint32_t*)output_buffer, size * 2);
+    configure_mpu((uint32_t*)output_buffer, size * 2);
     console_init();
     HAL_DMA_RegisterCallback(&USART_DMA_HANDLE, HAL_DMA_XFER_CPLT_CB_ID, &DMA_transfer_complete);
     HAL_MDMA_RegisterCallback(&USART_MDMA_HANDLE, HAL_MDMA_XFER_CPLT_CB_ID, &MDMA_transfer_complete);
