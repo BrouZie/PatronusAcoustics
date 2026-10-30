@@ -50,16 +50,16 @@ for _dev in Path("/sys/class/drm").glob("card*/device"):
 from configs.config import Config
 
 
-def run_data_ingestion():
+def run_data_ingestion(dataset_name: str):
     """Execute data ingestion pipeline."""
     from src.data_ingestion import run_ingestion
-    return run_ingestion()
+    return run_ingestion(dataset_name=dataset_name)
 
 
-def run_training():
+def run_training(dataset_name: str):
     """Execute complete training pipeline."""
     from src.train import run_training as train_pipeline
-    return train_pipeline()
+    return train_pipeline(dataset_name=dataset_name)
 
 def run_detection():
     """Execute complete detection pipeline."""
@@ -98,6 +98,13 @@ Configuration:
         help="Run complete training pipeline",
     )
     parser.add_argument(
+        "--dataset",
+        type=str,
+        required=False,
+        default=None,
+        help="Name of the dataset folder inside data/ (required for training)",
+        )
+    parser.add_argument(
         "--ingest",
         action="store_true",
         help="Run data ingestion only",
@@ -106,12 +113,6 @@ Configuration:
         "--detect",
         action="store_true",
         help="Run live threat detection from UART stream",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=None,
-        help=f"Detection threshold (default: {Config.THREAT_CONFIDENCE_THRESHOLD})",
     )
     parser.add_argument(
         "--config",
@@ -126,21 +127,29 @@ Configuration:
         Config.print_config()
 
     elif args.ingest:
+        if not args.dataset:
+            parser.error("--dataset is required when using --ingest")
+
         print("\n[MODE] Data Ingestion")
-        run_data_ingestion()
+        run_data_ingestion(args.dataset)
 
     elif args.detect:
         print("[MODE] Detection Pipeline")
         run_detection()
 
     elif args.train:
+        if not args.dataset:
+            parser.error("--dataset is required when using --train")
+
         print("\n[MODE] Training Pipeline")
+        print(f"[DATASET] Selected: {args.dataset}")
+
         print("\nStep 1: Data Ingestion")
-        ingestion = run_data_ingestion()
+        ingestion = run_data_ingestion(args.dataset)
 
         if ingestion and ingestion.validate_dataset():
             print("\nStep 2: Model Training")
-            run_training()
+            run_training(dataset_name=args.dataset)
         else:
             print("\n[ERROR] Dataset validation failed. Cannot proceed with training.")
             sys.exit(1)

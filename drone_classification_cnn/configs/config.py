@@ -27,10 +27,6 @@ class Config:
     PLOTS_DIR    = OUTPUT_DIR / "plots"
     LOGS_DIR     = OUTPUT_DIR / "logs"
 
-    # Dataset Configuration
-    DATASET_REPO_URL = "https://github.com/saraalemadi/DroneAudioDataset.git"
-    DATASET_NAME     = "DroneAudioDataset"
-
     # ===========================================
     # DATA Transfer
     # ===========================================
@@ -97,9 +93,10 @@ class Config:
     # ===========================================
     # UNPACKING PARQUET DRONE AUDIO DATASET
     # ===========================================
-    INPUT_PATH  = "data/geronimobasso_drone-audio-detection-samples"  # From ROOT of drone_classification_cnn
-    OUTPUT_PATH = "data/geronimobasso_drone-audio-detection-samples" # From ROOT of drone_classification_cnn
-    
+    DATA_INPUT_PATH  = Path("data/geronimobasso_drone-audio-detection-samples")  # From ROOT of drone_classification_cnn
+    DATA_OUTPUT_PATH = Path("data/geronimobasso") # From ROOT of drone_classification_cnn
+    DRONE_FOLDER = "drone"
+    BACKGROUND_FOLDER = "background"
 
     # ===========================================
     # SYSTEM CONFIGURATION

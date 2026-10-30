@@ -1,5 +1,10 @@
 """
-Unpack parquet from geronimobasso/drone-audio-detection-samples on HuggingFace
+Unpack parquet to sorted wav files 
+
+Make sure to change: 
+    DATA_INPUT_PATH depending on where your data is stored
+    DATA_OUTPUT_PATH for wanted location of new data
+    class_names, double check 0 is background and 1 is drone
 
 Output: .wav files stored in two folders, drone and unknown depending on the label
 """
@@ -14,9 +19,9 @@ sys.path.insert(0, str(ROOT))
 
 from configs.config import Config
 
-parquet_dir = ROOT / Config.INPUT_PATH
-output_dir = ROOT / Config.OUTPUT_PATH
-class_names = {0: "no_drone", 1: "drone"}
+parquet_dir = ROOT / Config.DATA_INPUT_PATH
+output_dir = ROOT / Config.DATA_OUTPUT_PATH
+class_names = {0: Config.BACKGROUND_FOLDER, 1: Config.DRONE_FOLDER}
 
 counter = 0
 for file in sorted(glob.glob(os.path.join(parquet_dir, "**", "*.parquet"), recursive=True)):

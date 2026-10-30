@@ -513,7 +513,7 @@ class Trainer:
         print(f"[SAVED] Training report: {save_path}")
 
 
-def run_training():
+def run_training(dataset_name: str):
     """Execute complete training pipeline."""
     print("\n" + "=" * 60)
     print("SUDARSHANchakra - ACOUSTIC UAV THREAT DETECTION")
@@ -526,7 +526,7 @@ def run_training():
 
     # Get data loaders
     print("\n[STEP 1] Loading dataset...")
-    train_loader, val_loader, test_loader, class_weights = get_data_loaders()
+    train_loader, val_loader, test_loader, class_weights = get_data_loaders(dataset_name=dataset_name)
 
     # Create model
     print("\n[STEP 2] Initializing model...")
@@ -564,4 +564,6 @@ def run_training():
 
 
 if __name__ == "__main__":
-    run_training()
+    if len(sys.argv) < 2:
+        sys.exit("Usage: python src/train.py <dataset_name>")
+    run_training(sys.argv[1])

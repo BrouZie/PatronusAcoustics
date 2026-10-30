@@ -30,50 +30,30 @@ class DataIngestion:
     This class focuses on the Binary_Drone_Audio subset.
     """
 
-    def __init__(self):
-        self.data_dir = Config.DATA_DIR
-        self.repo_url = Config.DATASET_REPO_URL
-        self.dataset_name = Config.DATASET_NAME
-        self.dataset_path = self.data_dir / self.dataset_name
+    def __init__(self, dataset_name: str):
+        self.data_root = Config.DATA_DIR
+        self.data_dir = self.data_root / dataset_name
+
+        # Prevent selecting paths outside the data directory
+        if self.data_dir.resolve().parent != self.data_root.resolve():
+            raise ValueError("Invalid dataset selection.")
+
+        if not self.data_dir.exists():
+            raise FileNotFoundError(
+                f"Dataset '{dataset_name}' was not found at {self.data_dir}"
+            )
+
+        if not self.data_dir.is_dir():
+            raise NotADirectoryError(
+                f"'{self.data_dir}' is not a directory."
+            )
 
         # Potential folder names for binary classification
-        self.drone_keywords = ["drone", "uav", "quadcopter"]
-        self.background_keywords = ["background", "unknown", "noise", "ambient", "safe"]
+        self.drone_keyword = Config.DRONE_FOLDER
+        self.background_keyword = Config.BACKGROUND_FOLDER
 
-    def clone_repository(self) -> bool:
-        """
-        Clone the DroneAudioDataset repository if not present.
-
-        Returns:
-            bool: True if successful or already exists
-        """
-        Config.create_directories()
-
-        if self.dataset_path.exists():
-            print(f"[INFO] Dataset already exists at: {self.dataset_path}")
-            return True
-
-        print(f"[INFO] Cloning DroneAudioDataset from GitHub...")
-        print(f"[INFO] Repository: {self.repo_url}")
-        print(f"[INFO] Destination: {self.dataset_path}")
-
-        try:
-            result = subprocess.run(
-                ["git", "clone", self.repo_url, str(self.dataset_path)],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            print("[SUCCESS] Repository cloned successfully!")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] Git clone failed: {e.stderr}")
-            return False
-
-        except FileNotFoundError:
-            print("[ERROR] Git is not installed. Please install Git and retry.")
-            return False
+        print(f"[DATASET] Selected: {dataset_name}")
+        print(f"[DATASET] Location: {self.data_dir}")
 
     def print_directory_tree(self, max_depth: int = 4) -> None:
         """
@@ -86,13 +66,13 @@ class DataIngestion:
         print("DATASET DIRECTORY STRUCTURE")
         print("=" * 60)
 
-        if not self.dataset_path.exists():
+        if not self.data_dir.exists():
             print("[ERROR] Dataset not found. Run clone_repository() first.")
             return
 
-        for root, dirs, files in os.walk(self.dataset_path):
+        for root, dirs, files in os.walk(self.data_dir):
             # Calculate depth
-            depth = root.replace(str(self.dataset_path), "").count(os.sep)
+            depth = root.replace(str(self.data_dir), "").count(os.sep)
             if depth > max_depth:
                 continue
 
@@ -116,47 +96,6 @@ class DataIngestion:
 
         print("=" * 60 + "\n")
 
-    def find_audio_directories(self) -> Dict[str, List[Path]]:
-        """
-        Dynamically discover directories containing audio files.
-
-        Returns:
-            Dict mapping category to list of directories
-        """
-        audio_dirs = {"drone": [], "background": [], "unknown": []}
-
-        if not self.dataset_path.exists():
-            print("[ERROR] Dataset not found.")
-            return audio_dirs
-
-        for root, dirs, files in os.walk(self.dataset_path):
-            # Check if directory contains wav files
-            wav_files = [f for f in files if f.lower().endswith(".wav")]
-            if not wav_files:
-                continue
-
-            root_path = Path(root)
-            dir_name = root_path.name.lower()
-            parent_name = root_path.parent.name.lower() if root_path.parent else ""
-
-            # Categorize based on folder naming
-            is_drone = any(kw in dir_name for kw in self.drone_keywords)
-            is_background = any(kw in dir_name for kw in self.background_keywords)
-
-            # Also check parent directory for context (e.g., Binary_Drone_Audio/Drone)
-            if not is_drone and not is_background:
-                is_drone = any(kw in parent_name for kw in self.drone_keywords)
-                is_background = any(kw in parent_name for kw in self.background_keywords)
-
-            if is_drone:
-                audio_dirs["drone"].append(root_path)
-            elif is_background:
-                audio_dirs["background"].append(root_path)
-            else:
-                audio_dirs["unknown"].append(root_path)
-
-        return audio_dirs
-
     def find_binary_data_paths(self) -> Tuple[Optional[Path], Optional[Path]]:
         """
         Locate the specific paths for binary classification data.
@@ -173,50 +112,20 @@ class DataIngestion:
         background_path = None
 
         # First, look for Binary_Drone_Audio specific structure
-        for root, dirs, files in os.walk(self.dataset_path):
+        for root, dirs, files in os.walk(self.data_dir):
             root_path = Path(root)
-            root_name_lower = root_path.name.lower()
+            name = root_path.name.lower()
 
             # Check if this directory contains wav files
-            wav_files = [f for f in files if f.lower().endswith(".wav")]
+            if not any(f.lower().endswith(".wav") for f in files):
+                continue
 
-            if wav_files:
-                # Priority 1: Exact match for "Drone" folder in Binary path
-                if "binary" in str(root_path).lower():
-                    if root_name_lower == "drone" or "drone" in root_name_lower:
-                        if not any(kw in root_name_lower for kw in self.background_keywords):
-                            drone_path = root_path
-                            print(f"[FOUND] Drone audio: {root_path} ({len(wav_files)} files)")
-
-                    elif any(kw in root_name_lower for kw in self.background_keywords):
-                        background_path = root_path
-                        print(f"[FOUND] Background audio: {root_path} ({len(wav_files)} files)")
-
-        # Fallback: Search more broadly if binary-specific paths not found
-        if not drone_path or not background_path:
-            print("[INFO] Performing broader search...")
-
-            for root, dirs, files in os.walk(self.dataset_path):
-                root_path = Path(root)
-                root_name_lower = root_path.name.lower()
-                wav_files = [f for f in files if f.lower().endswith(".wav")]
-
-                if wav_files:
-                    # Look for drone directories
-                    if not drone_path:
-                        if root_name_lower == "drone" or (
-                            "drone" in root_name_lower and
-                            not any(kw in root_name_lower for kw in self.background_keywords)
-                        ):
-                            drone_path = root_path
-                            print(f"[FOUND] Drone audio (fallback): {root_path}")
-
-                    # Look for background directories
-                    if not background_path:
-                        if any(kw == root_name_lower for kw in self.background_keywords) or \
-                           any(kw in root_name_lower for kw in self.background_keywords):
-                            background_path = root_path
-                            print(f"[FOUND] Background audio (fallback): {root_path}")
+            if drone_path is None and self.drone_keyword in name:
+                drone_path = root_path
+                print(f"[FOUND] Drone audio: {root_path}")
+            elif background_path is None and self.background_keyword in name:
+                background_path = root_path
+                print(f"[FOUND] Background audio: {root_path}")
 
         # Final validation
         if drone_path and background_path:
@@ -297,27 +206,22 @@ class DataIngestion:
             return False
 
 
-def run_ingestion():
+def run_ingestion(dataset_name: str):
     """Execute the complete data ingestion pipeline."""
     print("\n" + "=" * 60)
     print("SUDARSHANchakra - DATA INGESTION PIPELINE")
     print("Acoustic UAV Threat Detection System")
     print("=" * 60)
 
-    ingestion = DataIngestion()
+    ingestion = DataIngestion(dataset_name)
 
-    # Step 1: Clone repository
-    if not ingestion.clone_repository():
-        print("[FATAL] Failed to acquire dataset. Exiting.")
-        return None
-
-    # Step 2: Print directory structure
+    # Step 1: Print directory structure
     ingestion.print_directory_tree()
 
-    # Step 3: Locate binary data paths
+    # Step 2: Locate binary data paths
     drone_path, background_path = ingestion.find_binary_data_paths()
 
-    # Step 4: Validate dataset
+    # Step 3: Validate dataset
     if ingestion.validate_dataset():
         print("\n[READY] Dataset is ready for training!")
         return ingestion
@@ -327,4 +231,6 @@ def run_ingestion():
 
 
 if __name__ == "__main__":
-    run_ingestion()
+    if len(sys.argv) < 2:
+        sys.exit("Usage: python src/data_ingestion.py <dataset_name>")
+    run_ingestion(sys.argv[1])
