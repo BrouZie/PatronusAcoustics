@@ -21,10 +21,14 @@ target_compile_definitions(CMSISDSP PUBLIC __GNUC_PYTHON__)
 set_target_properties(CMSISDSP PROPERTIES SYSTEM ON)   # no -Wconversion noise from CMSIS headers
 
 add_executable(x86
-    platform.c
+    simulation.c
     main.c
-    dsp.c
+    ../src/dsp/dsp.c
 )
+
+target_include_directories(x86 PRIVATE ../src/dsp)
+target_include_directories(x86 PRIVATE ../src/config)
+target_include_directories(x86 PRIVATE ../src/types)
 
 target_link_libraries(x86 PRIVATE
     CMSISDSP

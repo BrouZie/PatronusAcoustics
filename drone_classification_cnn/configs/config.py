@@ -34,7 +34,8 @@ class Config:
     # ===========================================
     # DATA Transfer 
     # ===========================================
-    PORT     = "/dev/ttyACM0"
+    # PORT     = "/tmp/ttySIM0"
+    PORT = "/dev/ttyACM0"
     BAUDRATE = 921600
     MAGIC    = 0x4C454D4C # Used to detect when new image is incoming
 
