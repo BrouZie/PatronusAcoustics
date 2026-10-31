@@ -85,16 +85,18 @@ static inline int open_vusart(const char* port_name)
         perror("symlink");
     }
 
-    printf("Simulated UART on %s (%s)\n", port_name, name);
+    printf("Simulated UART over %s (%s)\n", port_name, name);
 
     return master;
 }
 
 static inline void vusart_send(int fd, const void* data, size_t len)
 {
+    // Not handling perror - so as to not flood stdout
+    // whenever nothing is connected
     if (write(fd, data, len) < 0)
     {
-        perror("write");
+        // perror("write");
     }
 }
 

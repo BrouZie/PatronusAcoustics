@@ -138,7 +138,7 @@ def detect(model, device, serial_port, baudrate, idle_timeout=None):
         print("Stopped.")
 
 def run_detection():
-    model, device = load_model(Config.MODEL_DIR / "best_model.pth")
+    model, device = load_model(Config.MODEL_DIR / "new_model.pth")
     detect(model, device, Config.PORT, Config.BAUDRATE) 
 
 if __name__ == "__main__":

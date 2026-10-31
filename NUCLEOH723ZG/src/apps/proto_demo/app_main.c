@@ -9,6 +9,11 @@
 
 #define LOGMEL
 #define BEAMFORM
+// #define BENCHMARK
+
+#ifdef BENCHMARK
+#include "clock.h"
+#endif
 
 #ifdef LOGMEL
 
@@ -89,13 +94,23 @@ void app_main(void)
     console_init();
 #endif // NOT LOGMEL
 #ifdef LOGMEL
+#ifndef BENCHMARK
     UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
+#endif
 
     uint16_t frame_idx = 0;
     uint32_t seq       = 0;
 #endif // LOGMEL
 
     uint32_t last_seq = 0;
+
+#ifdef BENCHMARK
+    console_init();
+    clock_cycles_init();
+    uint32_t last_cycle_count = clock_cycles();
+
+    float32_t elapsed_time, fps, mcpf;
+#endif
 
     while (true)
     {
@@ -136,7 +151,9 @@ void app_main(void)
             {
                 cells[b] = quantize_db(Mel.frame[b]);
             }
+#ifndef BENCHMARK
             UART_MDMA_send_buffer(_logmel_first_frame, sizeof(logmel_header_t) + NUM_MEL_BANDS);
+#endif
         }
         else
         {
@@ -145,7 +162,9 @@ void app_main(void)
             {
                 cells[b] = quantize_db(Mel.frame[b]);
             }
+#ifndef BENCHMARK
             UART_MDMA_send_buffer(cells, NUM_MEL_BANDS);
+#endif
             _active_write_buf ^= 1U;
         }
 
@@ -155,6 +174,18 @@ void app_main(void)
             seq++;
         }
 #endif // LOGMEL
+#ifdef BENCHMARK
+        uint32_t end_cycle_count = clock_cycles();
+        uint32_t elapsed_cycles = end_cycle_count - last_cycle_count;
+        float hz = clock_hz();
+
+        elapsed_time = (float)elapsed_cycles * 1000.0f / hz;
+        fps          = hz / (float)elapsed_cycles;
+        mcpf         = (float)elapsed_cycles / 1e6f;
+
+        printf("%.02fms/f, %.02ff/s, %.02fmc/f\r\n", elapsed_time, fps, mcpf);
+        last_cycle_count = clock_cycles();
+#endif
         ++last_seq;
     }
 }
