@@ -15,7 +15,8 @@ typedef float float32_t;
 typedef uint32_t bool32;
 typedef int16_t sample_t;
 
-#define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+#define ASSERT(expression)   do { if (!(expression)) { __builtin_trap(); }} while (0)
+#define ARRAY_COUNT(array)   (sizeof(array) / sizeof((array)[0]))
 #define SCALING_FACTOR(type) _Generic((type){0},            \
                                       int16_t:   INT16_MAX, \
                                       int32_t:   INT32_MAX, \

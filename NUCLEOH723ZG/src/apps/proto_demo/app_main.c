@@ -77,11 +77,11 @@ global PrevAudioFrame Prev DTCM; // NOTE: Interesting to benchmark
 
 global FFT_Spectrum Spec RAM1;
 
-global SRP_PHAT       Srp   DTCM;  // Storing wasteful things? Can it be moved
-global SRP_State      State RAM1; // This one is HUUUGE!
+global SRP_PHAT       Srp   DTCM;
+global SRP_State      State DTCM;
 global const SRP_Grid Grid = {
-    .az_start = -50.0f, .az_step = 2.0f,
-    .el_start = -50.0f, .el_step = 2.0f
+    .az_start = -45.0f, .az_step = 1.0f,
+    .el_start = -45.0f, .el_step = 1.0f
 };
 
 void app_main(void)
@@ -183,7 +183,10 @@ void app_main(void)
         fps          = hz / (float)elapsed_cycles;
         mcpf         = (float)elapsed_cycles / 1e6f;
 
+        // NOTE: One event loop should consistently hit fs / AUDIO_SAMPLES => 16kHz / 512 = 31.25 fps
+        // DSP pipeline should ideally have a higher fps rate ~25% higher (to provide some headroom).
         printf("%.02fms/f, %.02ff/s, %.02fmc/f\r\n", elapsed_time, fps, mcpf);
+
         last_cycle_count = clock_cycles();
 #endif
         ++last_seq;

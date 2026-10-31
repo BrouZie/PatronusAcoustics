@@ -33,8 +33,8 @@ global FFT_Spectrum Spec;
 global SRP_PHAT Srp;
 global SRP_State State;
 global const SRP_Grid Grid = {
-    .az_start = -60.0f, .az_step = 1.0f,
-    .el_start = -60.0f, .el_step = 1.0f
+    .az_start = -45.0f, .az_step = 1.0f,
+    .el_start = -45.0f, .el_step = 1.0f
 };
 
 #ifdef LOGMEL

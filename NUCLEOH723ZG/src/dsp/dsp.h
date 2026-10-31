@@ -22,9 +22,17 @@ enum
     SRP_BIN_LO = (SRP_BAND_MIN_HZ * DSP_BUFFER_LEN) / (int)SAMPLE_RATE_HZ,
     SRP_BIN_HI = (SRP_BAND_MAX_HZ * DSP_BUFFER_LEN) / (int)SAMPLE_RATE_HZ, // exclusive
 
-    SRP_ELEVATION_STEPS = 50,
-    SRP_AZIMUTH_STEPS   = 50,
-    SRP_DIRECTIONS      = (SRP_AZIMUTH_STEPS * SRP_ELEVATION_STEPS)
+    SRP_ELEVATION_STEPS = 101,
+    SRP_AZIMUTH_STEPS   = 101,
+    SRP_DIRECTIONS      = (SRP_AZIMUTH_STEPS * SRP_ELEVATION_STEPS),
+
+    // NOTE: If the array aperture is changed, you'll have to change this too!
+    // Largest |tau| (in samples) the array geometry can produce, with margin.
+    // Current array: ~0.254 m aperture * 16000/343 ≈ 11.9 samples.
+    // TODO(sok): Make MicArray positions compile-time constants and derive
+    // SRP_MAX_LAG and SRP_LAG_WINDOW from them.
+    SRP_MAX_LAG    = 16,
+    SRP_LAG_WINDOW = (2 * SRP_MAX_LAG + 2), // lags [-MAX_LAG, MAX_LAG + 1]
 };
 
 // Logmel
@@ -53,6 +61,7 @@ typedef struct
     float32_t x, y, z;
 } Vec3;
 
+// TODO: Make the positions compile-time known
 typedef struct
 {
     Vec3 pos[MIC_COUNT];
@@ -63,13 +72,7 @@ typedef struct
     uint16_t first, second;
 } MicPair;
 
-typedef struct
-{
-    uint16_t  i0;
-    uint16_t  i1;
-    float32_t alpha;
-} TimeLagLerp;
-
+// TODO: Make the grid compile-time known
 typedef struct
 {
     float32_t az_start, az_step, el_start, el_step;
@@ -77,14 +80,17 @@ typedef struct
 
 typedef struct
 {
-    TimeLagLerp candidates[SRP_DIRECTIONS][NUM_MIC_PAIRS];
-    MicPair     pairs[NUM_MIC_PAIRS];
-    SRP_Grid    grid;
+    MicPair   pairs[NUM_MIC_PAIRS];
+    Vec3      pair_delta[NUM_MIC_PAIRS];
+    float32_t sin_az[SRP_AZIMUTH_STEPS], cos_az[SRP_AZIMUTH_STEPS];
+    float32_t sin_el[SRP_ELEVATION_STEPS], cos_el[SRP_ELEVATION_STEPS];
+    SRP_Grid  grid;
 } SRP_State;
 
 typedef struct
 {
-    float32_t   correlations[NUM_MIC_PAIRS][DSP_BUFFER_LEN];
+    float32_t   correlations[NUM_MIC_PAIRS][SRP_LAG_WINDOW];
+    float32_t   ifft_out[DSP_BUFFER_LEN];
     float32_t   map[SRP_DIRECTIONS];
 
     float32_t   azimuth;
