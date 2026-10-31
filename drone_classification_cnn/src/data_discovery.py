@@ -1,9 +1,8 @@
 """
-SudarshanChakra - Data Ingestion Module
+Data Discovery Module
 Automatic dataset acquisition and validation for DroneAudioDataset.
 
 This module handles:
-1. Automatic cloning of the DroneAudioDataset repository
 2. Directory structure discovery and validation
 3. Locating Binary_Drone_Audio data paths dynamically
 """
@@ -19,15 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 
 
-class DataIngestion:
+class DatasetDiscovery:
     """
-    Handles automatic dataset acquisition and path discovery.
-
-    The DroneAudioDataset by Sara Al-Emadi contains:
-    - Binary classification data (Drone vs Background/Unknown)
-    - Multi-class data for different drone types
-
-    This class focuses on the Binary_Drone_Audio subset.
+    Handles automatic dataset path discovery.
     """
 
     def __init__(self, dataset_name: str):
@@ -206,31 +199,31 @@ class DataIngestion:
             return False
 
 
-def run_ingestion(dataset_name: str):
-    """Execute the complete data ingestion pipeline."""
+def run_discovery(dataset_name: str):
+    """Execute the complete data discovery pipeline."""
     print("\n" + "=" * 60)
-    print("SUDARSHANchakra - DATA INGESTION PIPELINE")
+    print("DATA DISCOVERY PIPELINE")
     print("Acoustic UAV Threat Detection System")
     print("=" * 60)
 
-    ingestion = DataIngestion(dataset_name)
+    discovery = DatasetDiscovery(dataset_name)
 
     # Step 1: Print directory structure
-    ingestion.print_directory_tree()
+    discovery.print_directory_tree()
 
     # Step 2: Locate binary data paths
-    drone_path, background_path = ingestion.find_binary_data_paths()
+    drone_path, background_path = discovery.find_binary_data_paths()
 
     # Step 3: Validate dataset
-    if ingestion.validate_dataset():
+    if discovery.validate_dataset():
         print("\n[READY] Dataset is ready for training!")
-        return ingestion
+        return discovery
     else:
         print("\n[WARNING] Dataset validation failed. Please check the data.")
-        return ingestion
+        return discovery
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit("Usage: python src/data_ingestion.py <dataset_name>")
-    run_ingestion(sys.argv[1])
+        sys.exit("Usage: python src/data_discovery.py <dataset_name>")
+    run_discovery(sys.argv[1])

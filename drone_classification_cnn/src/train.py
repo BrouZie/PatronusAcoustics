@@ -1,6 +1,5 @@
 """
-SudarshanChakra - Training Module
-Production-grade training pipeline with defense-optimized evaluation.
+Training Module
 
 Features:
 - Early stopping with patience
@@ -272,7 +271,7 @@ class Trainer:
             Training history dictionary
         """
         print("\n" + "=" * 60)
-        print("SUDARSHANchakra - TRAINING INITIATED")
+        print("TRAINING INITIATED")
         print("=" * 60)
         print(f"Device: {self.device}")
         print(f"Epochs: {num_epochs}")
@@ -412,7 +411,7 @@ class Trainer:
             yticklabels=Config.CLASS_NAMES,
             annot_kws={"size": 16},
         )
-        plt.title("SUDARSHANchakra - Threat Detection Confusion Matrix", fontsize=14)
+        plt.title("Threat Detection Confusion Matrix", fontsize=14)
         plt.ylabel("Actual", fontsize=12)
         plt.xlabel("Predicted", fontsize=12)
 
@@ -473,7 +472,7 @@ class Trainer:
         axes[1, 1].set_yscale("log")
         axes[1, 1].grid(True, alpha=0.3)
 
-        plt.suptitle("SUDARSHANchakra - Training Progress", fontsize=14)
+        plt.suptitle("Training Progress", fontsize=14)
         plt.tight_layout()
 
         save_path = Config.PLOTS_DIR / "training_history.png"
@@ -516,7 +515,6 @@ class Trainer:
 def run_training(dataset_name: str):
     """Execute complete training pipeline."""
     print("\n" + "=" * 60)
-    print("SUDARSHANchakra - ACOUSTIC UAV THREAT DETECTION")
     print("Training Pipeline Initialization")
     print("=" * 60)
 

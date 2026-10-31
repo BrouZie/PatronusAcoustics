@@ -21,8 +21,7 @@ import torchaudio
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
-from src.data_ingestion import DataIngestion
-
+from src.data_discovery import DatasetDiscovery
 
 class LogMelSpectrogram(nn.Module):
     """
@@ -322,9 +321,9 @@ def get_data_loaders(
         Tuple of (train_loader, val_loader, test_loader, class_weights)
     """
     # Get dataset files
-    ingestion = DataIngestion(dataset_name)
+    discovery = DatasetDiscovery(dataset_name)
 
-    drone_files, background_files = ingestion.get_all_audio_files()
+    drone_files, background_files = discovery.get_all_audio_files()
 
     if len(drone_files) == 0 or len(background_files) == 0:
         raise ValueError("Dataset is empty or not properly downloaded!")

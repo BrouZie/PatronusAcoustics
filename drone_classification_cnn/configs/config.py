@@ -1,20 +1,15 @@
 """
-SudarshanChakra - Configuration Module
-Defense-Grade Acoustic UAV Threat Detection System
+Patronus Acoustic - Configuration Module
 
 All system parameters centralized for operational deployment.
 """
-
-import os
 from pathlib import Path
-
 
 class Config:
     """
     Central configuration for the acoustic threat detection system.
 
     Parameters are tuned for optimal drone signature detection
-    in the 4-8kHz frequency range typical of UAV propellers.
     """
 
     # ===========================================
@@ -30,12 +25,11 @@ class Config:
     # ===========================================
     # DATA Transfer
     # ===========================================
-    PORT     = "/dev/ttyACM0"
     BAUDRATE = 921600
     MAGIC    = 0x4C454D4C # Used to detect when new image is incoming
 
     # Q_SCALE and Q_OFFSET is used to send data efficiently from MCU to CNN pipeline
-    Q_SCALE  = 1.50    # dequant: db = byte / Q_SCALE + Q_OFFSET
+    Q_SCALE  = 1.50   # dequant: db = byte / Q_SCALE + Q_OFFSET
     Q_OFFSET = -100.0 # db value of byte 0
 
     # ===========================================
@@ -91,12 +85,13 @@ class Config:
     THREAT_LABEL = 1
 
     # ===========================================
-    # UNPACKING PARQUET DRONE AUDIO DATASET
+    # UNPACKING PARQUET AUDIO DATASET
     # ===========================================
-    DATA_INPUT_PATH  = Path("data/geronimobasso_drone-audio-detection-samples")  # From ROOT of drone_classification_cnn
-    DATA_OUTPUT_PATH = Path("data/geronimobasso") # From ROOT of drone_classification_cnn
-    DRONE_FOLDER = "drone"
+    DATA_INPUT_PATH   = DATA_DIR / "geronimobasso_drone-audio-detection-samples"
+    DATA_OUTPUT_PATH  = DATA_DIR / "geronimobasso"
+    DRONE_FOLDER      = "drone"
     BACKGROUND_FOLDER = "background"
+    CLASS_NAMES       = {0: BACKGROUND_FOLDER, 1: DRONE_FOLDER} # Match with labels from downloaded dataset
 
     # ===========================================
     # SYSTEM CONFIGURATION
@@ -127,18 +122,3 @@ class Config:
         elif torch.backends.mps.is_available():
             return torch.device("mps")  # Apple Silicon
         return torch.device("cpu")
-
-    @classmethod
-    def print_config(cls):
-        """Display current configuration."""
-        print("\n" + "=" * 60)
-        print("SUDARSHANchakra - SYSTEM CONFIGURATION")
-        print("=" * 60)
-        print(f"Sample Rate:      {cls.SAMPLE_RATE} Hz")
-        print(f"Duration:         {cls.DURATION} s")
-        print(f"Mel Bins:         {cls.N_MELS}")
-        print(f"Frequency Range:  {cls.F_MIN}-{cls.F_MAX} Hz")
-        print(f"Batch Size:       {cls.BATCH_SIZE}")
-        print(f"Learning Rate:    {cls.LEARNING_RATE}")
-        print(f"Device:           {cls.get_device()}")
-        print("=" * 60 + "\n")

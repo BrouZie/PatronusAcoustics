@@ -1,30 +1,24 @@
 #!/usr/bin/env python3
 """
-SUDARSHANchakra - Acoustic UAV Threat Detection System
+Patronus Acoustic - Acoustic UAV Threat Detection System
 ======================================================
 
 Main entry point for the defense-grade acoustic surveillance system.
 
-Named after the divine discus weapon of Lord Vishnu - the Sudarshana Chakra -
-this system serves as a protective guardian, detecting aerial threats
-through acoustic signature analysis.
-
 Usage:
 ------
-    # Complete pipeline: ingest data, train model, evaluate
-    python main.py --train
+    # Unpacking .parquet files to sorted folder of the different labels
+    # DISCLAIMER: Every dataset is different! Match the config file to your dataset
+    python main.py --unpack_parquet
 
-    # Data ingestion only
-    python main.py --ingest
+    # Complete pipeline: discover data, train model, evaluate
+    python main.py --train --dataset
 
-    # Inference on audio file
-    python main.py --detect path/to/audio.wav
+    # Data discovery only
+    python main.py --discover --dataset
 
-    # Run demonstration
-    python main.py --demo
-
-Author: Defense AI Systems
-Version: 1.0.0
+    # Real time drone classification from data received over UART
+    python main.py --detect --model
 """
 
 import os
@@ -50,10 +44,10 @@ for _dev in Path("/sys/class/drm").glob("card*/device"):
 from configs.config import Config
 
 
-def run_data_ingestion(dataset_name: str):
-    """Execute data ingestion pipeline."""
-    from src.data_ingestion import run_ingestion
-    return run_ingestion(dataset_name=dataset_name)
+def run_data_discovery(dataset_name: str):
+    """Execute data discovery pipeline."""
+    from src.data_discovery import run_discovery
+    return run_discovery(dataset_name=dataset_name)
 
 
 def run_training(dataset_name: str):
@@ -61,10 +55,15 @@ def run_training(dataset_name: str):
     from src.train import run_training as train_pipeline
     return train_pipeline(dataset_name=dataset_name)
 
-def run_detection():
+def run_detection(model, serial_port):
     """Execute complete detection pipeline."""
     from src.detect import run_detection as detection_pipeline
-    return detection_pipeline()
+    return detection_pipeline(model, serial_port)
+
+def unpack_parquet(input_folder, output_folder):
+    """Unpack .parquet files sorted folder with different labels"""
+    from src.unpack_parquet import unpack_parquet
+    return unpack_parquet(input_folder, output_folder)
 
 def main():
     """Main entry point."""
@@ -74,17 +73,14 @@ def main():
         epilog="""
 Pipeline Commands:
 ------------------
-  --train           Run complete training pipeline (ingest -> train -> evaluate)
-  --ingest          Download and prepare dataset only
-  --detect          Analyze audio for threats
-  --demo            Run demonstration with sample data
+  --train           Run complete training pipeline (discover -> train -> evaluate)
+  --discover        Discover and validate dataset only
+  --detect          Real time detection with data sent over UART
 
 Examples:
 ---------
-  python main.py --train
-  python main.py --detect recording.wav
-  python main.py --detect recording.wav --threshold 0.3
-  python main.py --demo
+  python main.py --train --dataset dataset
+  python main.py --detect --model best.pth
 
 Configuration:
 --------------
@@ -105,9 +101,9 @@ Configuration:
         help="Name of the dataset folder inside data/ (required for training)",
         )
     parser.add_argument(
-        "--ingest",
+        "--discover",
         action="store_true",
-        help="Run data ingestion only",
+        help="Run data discovery only",
     )
     parser.add_argument(
         "--detect",
@@ -115,27 +111,38 @@ Configuration:
         help="Run live threat detection from UART stream",
     )
     parser.add_argument(
-        "--config",
+        "--unpack_parquet",
         action="store_true",
-        help="Display current configuration",
+        help="Unpack .parquet files and sort with respect to label",
     )
-
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=False,
+        default=None,
+        help="Name of the model inside outputs/model (required for detection)",
+        )
+    parser.add_argument(
+        "--serial_port",
+        type=str,
+        required=False,
+        default=None,
+        help="Name of the serial port(Ex. /dev/ttyACM0)",
+        )
     args = parser.parse_args()
 
-    # Execute requested operation
-    if args.config:
-        Config.print_config()
-
-    elif args.ingest:
+    if args.discover:
         if not args.dataset:
-            parser.error("--dataset is required when using --ingest")
+            parser.error("--dataset is required when using --discovery")
 
-        print("\n[MODE] Data Ingestion")
-        run_data_ingestion(args.dataset)
+        print("\n[MODE] Data Discovery")
+        run_data_discovery(args.dataset)
 
     elif args.detect:
+        if not args.model or not args.serial_port:
+            parser.error("--model and --port is required when using --detect")
         print("[MODE] Detection Pipeline")
-        run_detection()
+        run_detection(args.model, args.serial_port)
 
     elif args.train:
         if not args.dataset:
@@ -144,22 +151,26 @@ Configuration:
         print("\n[MODE] Training Pipeline")
         print(f"[DATASET] Selected: {args.dataset}")
 
-        print("\nStep 1: Data Ingestion")
-        ingestion = run_data_ingestion(args.dataset)
+        print("\nStep 1: Data Discovery")
+        discovery = run_data_discovery(args.dataset)
 
-        if ingestion and ingestion.validate_dataset():
+        if discovery and discovery.validate_dataset():
             print("\nStep 2: Model Training")
             run_training(dataset_name=args.dataset)
         else:
             print("\n[ERROR] Dataset validation failed. Cannot proceed with training.")
             sys.exit(1)
+    
+    elif args.unpack_parquet:
+        print("\n[MODE] Unpack .parquet files")
+        unpack_parquet(Config.DATA_INPUT_PATH, Config.DATA_OUTPUT_PATH)
 
     else:
         parser.print_help()
         print("\n" + "=" * 60)
         print("Quick Start:")
-        print("  1. Train the model:  python main.py --train")
-        print("  2. Run detection:    python main.py --detect audio.wav")
+        print("  1. Train the model:  python main.py --train --dataset <dataset_name>")
+        print("  2. Run detection:    python main.py --detect --model <model.pth> --port <Serialport name>")
         print("=" * 60)
 
 
