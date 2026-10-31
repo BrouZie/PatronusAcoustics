@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-inline void clock_delay_ms(uint32_t delay) { HAL_Delay(delay); }
-inline uint32_t clock_millis() { return HAL_GetTick(); }
+void clock_delay_ms(uint32_t delay) { HAL_Delay(delay); }
+uint32_t clock_millis() { return HAL_GetTick(); }
 
-inline void clock_cycles_init()
+void clock_cycles_init()
 {
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->LAR = 0xC5ACCE55;
@@ -14,7 +14,7 @@ inline void clock_cycles_init()
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
-inline uint32_t clock_cycles()
+uint32_t clock_cycles()
 {
     return DWT->CYCCNT;
 }

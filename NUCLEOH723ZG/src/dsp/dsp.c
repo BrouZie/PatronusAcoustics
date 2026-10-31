@@ -8,8 +8,9 @@
 
 #define MEL_EPS 1e-10f
 
-_Static_assert(SRP_BIN_LO >= 1,                "band can't start at DC");
-_Static_assert(SRP_BIN_HI <= DSP_COMPLEX_BINS, "band exceeds spectrum");
+_Static_assert(SRP_BIN_LO >= 1,                      "band can't start at DC");
+_Static_assert(SRP_BIN_HI <= DSP_COMPLEX_BINS,       "band exceeds spectrum");
+_Static_assert(SRP_LAG_WINDOW <= DSP_BUFFER_LEN / 2, "Lag window wider than IFFT output");
 
 _Static_assert((int)SAMPLE_RATE_HZ == 16000,   "mel_fbank.h generated for 16 kHz");
 _Static_assert(DSP_BUFFER_LEN == 1024,         "mel_fbank.h generated for n_fft=1024");
@@ -82,7 +83,7 @@ internal void mic_delay_samples(const MicArray* pos, float32_t az, float32_t el,
     }
 }
 
-void dsp_init_srp(const SRP_Grid* grid, const MicArray* pos, SRP_State* state)
+void dsp_init_srp(const SRP_Grid* grid, const MicArray* arr, SRP_State* state)
 {
     state->grid = *grid;
 
@@ -91,49 +92,61 @@ void dsp_init_srp(const SRP_Grid* grid, const MicArray* pos, SRP_State* state)
     {
         for (uint8_t mic2 = mic1 + 1; mic2 < MIC_COUNT; ++mic2)
         {
-            state->pairs[pair_idx++] = (MicPair) { .first = mic1, .second = mic2 };
+            const Vec3* p1 = &arr->pos[mic1];
+            const Vec3* p2 = &arr->pos[mic2];
+
+            // tau = delay[first] - delay[second] = dot(p2 - p1, u) * fs / c
+            Vec3 d = {
+                .x = (p2->x - p1->x) * SRP_SAMPLES_PER_METER,
+                .y = (p2->y - p1->y) * SRP_SAMPLES_PER_METER,
+                .z = (p2->z - p1->z) * SRP_SAMPLES_PER_METER,
+            };
+            // |u| = 1, so |tau| <= |d| <= L1 norm; must fit the compact lag window
+            // TODO: Remove when mic positions are compiletime known
+            ASSERT(sqrtf(d.x * d.x + d.y * d.y + d.z * d.z) < (float32_t)SRP_MAX_LAG);
+
+            state->pairs[pair_idx] = (MicPair) { .first = mic1, .second = mic2 };
+            state->pair_delta[pair_idx++] = d;
         }
     }
 
-    uint32_t dir_idx = 0;
     for (uint32_t az_idx = 0; az_idx < SRP_AZIMUTH_STEPS; ++az_idx)
     {
-        for (uint32_t el_idx = 0; el_idx < SRP_ELEVATION_STEPS; ++el_idx, ++dir_idx)
-        {
-            float32_t delay[MIC_COUNT];
-            mic_delay_samples(pos, grid->az_start + (float32_t)az_idx * grid->az_step, grid->el_start + (float32_t)el_idx * grid->el_step, delay);
-
-            for (pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
-            {
-                float32_t tau   = delay[state->pairs[pair_idx].first] - delay[state->pairs[pair_idx].second];
-                float32_t floor = floorf(tau);
-
-                // mask wraps negative lags to the end of the INVERSE_FFT output
-                int32_t   i_floor = (int32_t)floor;
-                uint16_t  i0      = (uint16_t)(i_floor & (DSP_BUFFER_LEN - 1));
-                state->candidates[dir_idx][pair_idx] = (TimeLagLerp){
-                    .i0    = i0,
-                    .i1    = (uint16_t)((i0 + 1) & (DSP_BUFFER_LEN - 1)),
-                    .alpha = tau - floor,
-                };
-            }
-        }
+        arm_sin_cos_f32(grid->az_start + (float32_t)az_idx * grid->az_step, &state->sin_az[az_idx], &state->cos_az[az_idx]);
+    }
+    for (uint32_t el_idx = 0; el_idx < SRP_ELEVATION_STEPS; ++el_idx)
+    {
+        arm_sin_cos_f32(grid->el_start + (float32_t)el_idx * grid->el_step, &state->sin_el[el_idx], &state->cos_el[el_idx]);
     }
 }
 
 internal inline void srp_map_lookup(const SRP_State* state, SRP_PHAT* srp)
 {
-    for (uint32_t dir_idx = 0; dir_idx < SRP_DIRECTIONS; ++dir_idx)
+    // az outer / el inner keeps dir_idx = az_idx * EL_STEPS + el_idx (argmax decode relies on it)
+    uint32_t dir_idx = 0;
+    for (uint32_t az_idx = 0; az_idx < SRP_AZIMUTH_STEPS; ++az_idx)
     {
-        float32_t power = 0.0f;
-        for (uint32_t pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
+        for (uint32_t el_idx = 0; el_idx < SRP_ELEVATION_STEPS; ++el_idx)
         {
-            const float32_t *corr = srp->correlations[pair_idx];
-            const TimeLagLerp* lag = &state->candidates[dir_idx][pair_idx];
+            // Same mathmatical computation as is done in angles_to_vec3()
+            const float32_t ux = state->cos_el[el_idx] * state->sin_az[az_idx];
+            const float32_t uy = state->sin_el[el_idx];
+            const float32_t uz = state->cos_el[el_idx] * state->cos_az[az_idx];
 
-            power += corr[lag->i0] + lag->alpha * (corr[lag->i1] - corr[lag->i0]);
+            float32_t power = 0.0f;
+            for (uint32_t pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
+            {
+                const Vec3*      d    = &state->pair_delta[pair_idx];
+                const float32_t* corr = srp->correlations[pair_idx];
+
+                float32_t tau   = d->x * ux + d->y * uy + d->z * uz;
+                float32_t floor = floorf(tau);
+                int32_t   i0    = (int32_t)floor + SRP_MAX_LAG; // compact window, no wrap needed
+
+                power += corr[i0] + (tau - floor) * (corr[i0 + 1] - corr[i0]);
+            }
+            srp->map[dir_idx++] = power;
         }
-        srp->map[dir_idx] = power;
     }
 }
 
@@ -166,7 +179,12 @@ void dsp_compute_srp(const SRP_State* state, FFT_Spectrum* spec, SRP_PHAT* srp)
             spec->scratch[spec_idx + 1] = imag / denom;
         }
         #define INVERSE_FFT 1
-        arm_rfft_fast_f32(&g_Rfft, spec->scratch, srp->correlations[pair_idx], INVERSE_FFT);
+        arm_rfft_fast_f32(&g_Rfft, spec->scratch, srp->ifft_out, INVERSE_FFT);
+
+        // Keep only lags [-MAX_LAG, MAX_LAG + 1]; negative lags wrap to the end of the IFFT output
+        float32_t* row = srp->correlations[pair_idx];
+        memcpy(row,               &srp->ifft_out[DSP_BUFFER_LEN - SRP_MAX_LAG], SRP_MAX_LAG       * sizeof(float32_t));
+        memcpy(row + SRP_MAX_LAG, &srp->ifft_out[0],                            (SRP_MAX_LAG + 2) * sizeof(float32_t));
     }
 
     srp_map_lookup(state, srp);

@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-inline void     clock_delay_ms(uint32_t delay);
-inline uint32_t clock_millis(void);
-inline void     clock_cycles_init(void);
-inline uint32_t clock_cycles(void);
-inline uint32_t clock_hz(void);
+void     clock_delay_ms(uint32_t delay);
+uint32_t clock_millis(void);
+void     clock_cycles_init(void);
+uint32_t clock_cycles(void);
+uint32_t clock_hz(void);
 
 #endif
