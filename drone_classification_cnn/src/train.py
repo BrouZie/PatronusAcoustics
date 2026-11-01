@@ -109,6 +109,7 @@ class Trainer:
         test_loader: DataLoader,
         class_weights: Optional[torch.Tensor] = None,
         device: Optional[torch.device] = None,
+        model_name: str = "best_model",
     ):
         self.device = device or Config.get_device()
         self.model = model.to(self.device)
@@ -157,7 +158,7 @@ class Trainer:
 
         # Best model tracking
         self.best_val_loss = float("inf")
-        self.best_model_path = Config.MODEL_DIR / "best_model.pth"
+        self.best_model_path = Config.MODEL_DIR / f"{model_name}.pth"
 
         # Create output directories
         Config.create_directories()
@@ -537,6 +538,7 @@ def run_training(dataset_name: str):
         val_loader=val_loader,
         test_loader=test_loader,
         class_weights=class_weights,
+        model_name=dataset_name,
     )
 
     # Train
