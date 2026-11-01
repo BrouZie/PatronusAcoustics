@@ -25,7 +25,7 @@ def unpack_parquet(input_folder, output_folder):
         input_folder: Location of all the .parquet file
         output_folder: Location of output sorted files
 
-    Make sure Config.CLASS_NAMES fit with the unpacked dataset 
+    Make sure Config.LABEL_TO_FOLDER fit with the unpacked dataset 
     """
 
     print("input:", Path(input_folder).resolve(), "exists:", Path(input_folder).exists())
@@ -38,7 +38,7 @@ def unpack_parquet(input_folder, output_folder):
         pf = pq.ParquetFile(file)
         for batch in pf.iter_batches(batch_size=500):
             for row in batch.to_pylist():
-                label = Config.CLASS_NAMES[row["label"]]
+                label = Config.LABEL_TO_FOLDER[row["label"]]
                 folder = os.path.join(output_folder, label)
                 os.makedirs(folder, exist_ok=True)
 

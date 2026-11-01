@@ -91,7 +91,7 @@ class Config:
     DATA_OUTPUT_PATH  = DATA_DIR / "geronimobasso"
     DRONE_FOLDER      = "drone"
     BACKGROUND_FOLDER = "background"
-    CLASS_NAMES       = {0: BACKGROUND_FOLDER, 1: DRONE_FOLDER} # Match with labels from downloaded dataset
+    LABEL_TO_FOLDER       = {0: BACKGROUND_FOLDER, 1: DRONE_FOLDER} # Match with labels from downloaded dataset
 
     # ===========================================
     # SYSTEM CONFIGURATION
