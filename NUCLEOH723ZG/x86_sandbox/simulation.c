@@ -7,11 +7,11 @@
 // An array of 2 frames just because the STM32 will have two of them
 // It is strictly unnecessary on x86, but kept so that both platforms
 // are almost identical
-global AudioFrame g_PlatformAudioFrame[2];
-global uint32_t   g_Sequence;
+global AudioFrame SimAudioFrame[2];
+global uint32_t   Sequence;
 
-global const float g_BaseToneHz = 300.0f;
-global const float g_HarmonicLevels[] = { 1.0f, 0.6f, 0.4f, 0.25f };
+global const float BaseToneHz = 300.0f;
+global const float HarmonicLevels[] = { 1.0f, 0.6f, 0.4f, 0.25f };
 
 // Local array frame: mics in x–y plane, boresight = +z
 // az: deflection toward +x (left/right), el: deflection toward +y (up/down)
@@ -68,22 +68,22 @@ bool32 sim_produce_frame(rng_t* r, AudioFrameView* view, MicArray array, AngleDe
             float t = (float)n / ICS_SAMPLE_RATE_HZ - tau;
 
             float sample = 0.0f;
-            for (uint32_t level_idx = 0; level_idx < ARRAY_COUNT(g_HarmonicLevels); level_idx++)
+            for (uint32_t level_idx = 0; level_idx < ARRAY_COUNT(HarmonicLevels); level_idx++)
             {
-                sample += g_HarmonicLevels[level_idx] * sinf(2 * PI * ((float)level_idx + 1) * g_BaseToneHz * t);
+                sample += HarmonicLevels[level_idx] * sinf(2 * PI * ((float)level_idx + 1) * BaseToneHz * t);
             }
             float noise  = rng_gaussf(r) * 0.006f;
             sample =  sample * 0.3f + noise;
             sample = fmaxf(-1.0f, fminf(1.0f, sample));
 
-            g_PlatformAudioFrame[g_Sequence % 2].pcm[sample_idx][mic_idx] = (sample_t)(sample * SCALING_FACTOR(sample_t));
+            SimAudioFrame[Sequence % 2].pcm[sample_idx][mic_idx] = (sample_t)(sample * SCALING_FACTOR(sample_t));
         }
     }
 
     prev_direction = direction;
     sample_idx_offset += AUDIO_SAMPLES;
-    view->seq   = g_Sequence;
-    view->frame = &g_PlatformAudioFrame[g_Sequence++ % 2];
+    view->seq   = Sequence;
+    view->frame = &SimAudioFrame[Sequence++ % 2];
 
     return 1;
 }

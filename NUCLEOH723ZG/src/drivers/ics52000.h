@@ -3,7 +3,6 @@
 
 #include "types.h"
 
-// TODO(sok): Throw away ~300ms of frame samples at startup
 bool32 ics52000_init(void);
 bool32 ics52000_read(AudioFrameView* view);
 

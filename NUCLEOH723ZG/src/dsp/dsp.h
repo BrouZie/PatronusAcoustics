@@ -22,8 +22,8 @@ enum
     SRP_BIN_LO = (SRP_BAND_MIN_HZ * DSP_BUFFER_LEN) / (int)SAMPLE_RATE_HZ,
     SRP_BIN_HI = (SRP_BAND_MAX_HZ * DSP_BUFFER_LEN) / (int)SAMPLE_RATE_HZ, // exclusive
 
-    SRP_ELEVATION_STEPS = 101,
-    SRP_AZIMUTH_STEPS   = 101,
+    SRP_ELEVATION_STEPS = 91,
+    SRP_AZIMUTH_STEPS   = 91,
     SRP_DIRECTIONS      = (SRP_AZIMUTH_STEPS * SRP_ELEVATION_STEPS),
 
     // NOTE: If the array aperture is changed, you'll have to change this too!

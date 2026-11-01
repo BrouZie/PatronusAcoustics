@@ -6,8 +6,6 @@
 #include "sai.h"
 #include "mpu.h"
 
-_Static_assert(MIC_COUNT <= 8, "SAI frame is capped at 256 bits (8 x 32-bit slots)");
-
 #define ICS_SAI_HANDLE_1 hsai_BlockA1
 #define STARTUP_DISCARD_HALVES ((uint32_t)(0.300f * SAMPLE_RATE_HZ / AUDIO_SAMPLES) + 1)
 
@@ -21,12 +19,15 @@ enum
     SAI_ACTIVE_SLOTS = (1 << MIC_COUNT) - 1,
 };
 
-global AudioFrame g_PPAudioFrame[2] RAM1; // Ping-pong audio frame
-global volatile uint32_t g_Sequence;
+_Static_assert(MIC_COUNT <= 8, "SAI frame is capped at 256 bits (8 x 32-bit slots)");
+_Static_assert(2 * sizeof(AudioFrame) <= 16384, "Audio buffer exceeds its DMA_BUF region");
+
+global AudioFrame PPAudioFrame[2] DMA_BUF; // Ping-pong audio frame
+global volatile uint32_t Sequence;
 
 bool32 ics52000_init(void)
 {
-    configure_mpu((uint32_t*)g_PPAudioFrame, sizeof(g_PPAudioFrame));
+    configure_mpu((uint32_t*)PPAudioFrame, sizeof(PPAudioFrame));
 
     // Reconfiguring SAI so we can change mic count without any trouble
     HAL_SAI_DeInit(&ICS_SAI_HANDLE_1);
@@ -41,8 +42,8 @@ bool32 ics52000_init(void)
     }
 
     // DMA startup
-    if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)g_PPAudioFrame,
-                            sizeof(g_PPAudioFrame) / sizeof(sample_t)) != HAL_OK)
+    if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)PPAudioFrame,
+                            sizeof(PPAudioFrame) / sizeof(sample_t)) != HAL_OK)
     {
         Error_Handler();
     }
@@ -55,7 +56,7 @@ bool32 ics52000_init(void)
 // comparing to previous frame (dsp.c), maybe it's irrelevant.
 bool32 ics52000_read(AudioFrameView* view)
 {
-    uint32_t seq = g_Sequence;
+    uint32_t seq = Sequence;
 
     // Data is invalid while the mic is starting up
     if (seq <= STARTUP_DISCARD_HALVES)
@@ -64,7 +65,7 @@ bool32 ics52000_read(AudioFrameView* view)
     }
 
     view->seq   = seq;
-    view->frame = &g_PPAudioFrame[(seq - 1) % 2];
+    view->frame = &PPAudioFrame[(seq - 1) % 2];
 
     return true;
 }
@@ -75,7 +76,7 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef* hsai)
 {
     if (hsai->Instance == SAI1_Block_A)
     {
-        ++g_Sequence;
+        ++Sequence;
     }
 }
 
@@ -83,7 +84,7 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef* hsai)
 {
     if (hsai->Instance == SAI1_Block_A)
     {
-        ++g_Sequence;
+        ++Sequence;
     }
 }
 

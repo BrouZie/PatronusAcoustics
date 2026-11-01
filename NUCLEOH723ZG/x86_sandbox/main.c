@@ -23,7 +23,7 @@ global const MicArray MicPositions = { {
     { 0.0000000f, 0.1335750f, 0.0f },
     { 0.1270370f, 0.0412770f, 0.0f },
     { 0.0785130f, -0.108064f, 0.0f },
-    { -0.075183f, -0.108064f, 0.0f },
+    { -0.078513f, -0.108064f, 0.0f },
     { -0.127037f, 0.0412770f, 0.0f },
 } };
 
@@ -62,24 +62,14 @@ global Logmel  Mel;
 global uint8_t MelPackets[NUM_MEL_BANDS];
 global uint8_t FirstPacket[sizeof(logmel_header_t) + NUM_MEL_BANDS];
 
-#ifdef BEAMFORM
+    #ifdef BEAMFORM
 global float32_t BeamSpectrum[DSP_BUFFER_LEN];
-#endif // BEAMFORM END
+    #endif // BEAMFORM END
 
 #endif // LOGMEL END
 
 int main()
 {
-    // SimState sim = {
-    //     .angle = { .az = 40, .el = 30 },
-    //     .array.pos = {
-    //         { 0.0000000f, 0.1335750f, 0.0f },
-    //         { 0.1270370f, 0.0412770f, 0.0f },
-    //         { 0.0785130f, -0.108064f, 0.0f },
-    //         { -0.075183f, -0.108064f, 0.0f },
-    //         { -0.127037f, 0.0412770f, 0.0f },
-    //     }
-    // };
     // rng_seed_entropy(&R);
     rng_seed(&R, 100);
     sim_produce_frame(&R, &View, MicPositions, SourceDirection);
@@ -114,18 +104,18 @@ int main()
         // SRP-PHAT
         dsp_compute_srp(&State, &Spec, &Srp);
 #ifndef LOGMEL
-#ifndef BENCHMARK
+    #ifndef BENCHMARK
         printf("azimuth: %.2f\televation: %.2f\n", Srp.azimuth, Srp.elevation);
-#endif // NOT BENCHMARK
+    #endif // NOT BENCHMARK
 #endif // NOT LOGMEL
 
 #ifdef LOGMEL
-#ifdef BEAMFORM
+    #ifdef BEAMFORM
         dsp_beamform_delay_sum(&Spec, &MicPositions, Srp.azimuth, Srp.elevation, BeamSpectrum);
         const float32_t* mel_input = BeamSpectrum;
-#else
+    #else
         const float32_t* mel_input = Spec.bins[0];
-#endif
+    #endif
         dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
         uint8_t* out = MelPackets;
         uint8_t* cells;
@@ -144,9 +134,9 @@ int main()
             {
                 cells[b] = quantize_db(Mel.frame[b]);
             }
-#ifndef BENCHMARK
+    #ifndef BENCHMARK
             vusart_send(vusart, FirstPacket, sizeof(logmel_header_t) + NUM_MEL_BANDS);
-#endif
+    #endif
         }
         else
         {
@@ -155,9 +145,9 @@ int main()
             {
                 cells[b] = quantize_db(Mel.frame[b]);
             }
-#ifndef BENCHMARK
+    #ifndef BENCHMARK
             vusart_send(vusart, cells, NUM_MEL_BANDS);
-#endif
+    #endif
         }
 
         if (++frame_idx == NUM_FRAMES)

@@ -23,7 +23,6 @@
 
 // LOGMEL SHIT START
 #define LOGMEL_FRAME_DTCM_BUF     ".dtcm_buf" // -> DTCMRAM
-#define LOGMEL_SPECTOGRAM_RAM_BUF ".d1_buf"   // -> RAM_D1
 #define LOGMEL_MAGIC               0x4C454D4C
 #define LOGMEL_Q_SCALE             1.5f
 #define LOGMEL_Q_OFFSET            -100.0f
@@ -42,8 +41,7 @@ static uint8_t  _active_write_buf  = 0;
 static uint8_t _logmel_first_frame[sizeof(logmel_header_t) + NUM_MEL_BANDS]
     __attribute__((section(LOGMEL_FRAME_DTCM_BUF), aligned(32)));
 static uint8_t _logmel_frame[2][NUM_MEL_BANDS] __attribute__((section(LOGMEL_FRAME_DTCM_BUF), aligned(32)));
-static uint8_t _logmel_spectogram[2][sizeof(logmel_header_t) + NUM_FRAMES * NUM_MEL_BANDS]
-    __attribute__((section(LOGMEL_SPECTOGRAM_RAM_BUF), aligned(32)));
+static uint8_t _logmel_spectogram[2][sizeof(logmel_header_t) + NUM_FRAMES * NUM_MEL_BANDS] DMA_BUF;
 
 global Logmel Mel DTCM;
 
@@ -56,18 +54,18 @@ static inline uint8_t quantize_db(float32_t db)
     return (uint8_t)(byte_value + 0.5f);
 }
 
-#ifdef BEAMFORM
+    #ifdef BEAMFORM
 global float32_t BeamSpectrum[DSP_BUFFER_LEN] DTCM;
-#endif // BEAMFORM END
+    #endif // BEAMFORM END
 
 #endif // LOGMEL END
 
 global const MicArray MicPositions = { {
-    { 0.0000000f, 0.1335750f, 0.0f },
-    { 0.1270370f, 0.0412770f, 0.0f },
-    { 0.0785130f, -0.108064f, 0.0f },
-    { -0.075183f, -0.108064f, 0.0f },
-    { -0.127037f, 0.0412770f, 0.0f },
+    { -0.078513f, -0.108064f, 0.0f }, // mic 0: lower left
+    {  0.078513f, -0.108064f, 0.0f }, // mic 1: lower right
+    {  0.127037f,  0.041277f, 0.0f }, // mic 2: right
+    {  0.000000f,  0.133575f, 0.0f }, // mic 3: top
+    { -0.127037f,  0.041277f, 0.0f }, // mic 4: left
 } };
 
 // TODO: Benchmark different placements and
@@ -78,7 +76,7 @@ global PrevAudioFrame Prev DTCM; // NOTE: Interesting to benchmark
 global FFT_Spectrum Spec RAM1;
 
 global SRP_PHAT       Srp   DTCM;
-global SRP_State      State DTCM;
+global SRP_State      State RAM1;
 global const SRP_Grid Grid = {
     .az_start = -45.0f, .az_step = 1.0f,
     .el_start = -45.0f, .el_step = 1.0f
@@ -94,9 +92,9 @@ void app_main(void)
     console_init();
 #endif // NOT LOGMEL
 #ifdef LOGMEL
-#ifndef BENCHMARK
+    #ifndef BENCHMARK
     UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
-#endif
+    #endif
 
     uint16_t frame_idx = 0;
     uint32_t seq       = 0;
@@ -123,16 +121,18 @@ void app_main(void)
         dsp_compute_srp(&State, &Spec, &Srp);
 
 #ifndef LOGMEL
-        printf("azimuth: %.2f\televation: %.2f\r\n", -Srp.azimuth, -Srp.elevation);
+    #ifndef BENCHMARK
+        printf("azimuth: %.2f\televation: %.2f\r\n", Srp.azimuth, Srp.elevation);
+    #endif // NOT BENCHMARK
 #endif // NOT LOGMEL
 
 #ifdef LOGMEL
-#ifdef BEAMFORM
+    #ifdef BEAMFORM
         dsp_beamform_delay_sum(&Spec, &MicPositions, Srp.azimuth, Srp.elevation, BeamSpectrum);
         const float32_t* mel_input = BeamSpectrum;
-#else
+    #else
         const float32_t* mel_input = Spec.bins[0];
-#endif
+    #endif
         dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
         uint8_t* out = _logmel_frame[_active_write_buf];
         uint8_t* cells;
@@ -151,9 +151,9 @@ void app_main(void)
             {
                 cells[b] = quantize_db(Mel.frame[b]);
             }
-#ifndef BENCHMARK
+    #ifndef BENCHMARK
             UART_MDMA_send_buffer(_logmel_first_frame, sizeof(logmel_header_t) + NUM_MEL_BANDS);
-#endif
+    #endif
         }
         else
         {
@@ -162,9 +162,9 @@ void app_main(void)
             {
                 cells[b] = quantize_db(Mel.frame[b]);
             }
-#ifndef BENCHMARK
+    #ifndef BENCHMARK
             UART_MDMA_send_buffer(cells, NUM_MEL_BANDS);
-#endif
+    #endif
             _active_write_buf ^= 1U;
         }
 
@@ -189,6 +189,6 @@ void app_main(void)
 
         last_cycle_count = clock_cycles();
 #endif
-        ++last_seq;
+        last_seq = View.seq;
     }
 }

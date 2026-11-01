@@ -20,6 +20,11 @@ void configure_mpu(uint32_t* base_address, uint32_t size_bytes)
 {
 	local_persist uint8_t mpu_region_number = 0x00;
 
+    // The MPU ignores base address bits below the region size, so a misaligned
+    // buffer silently ends up partly outside its region and stays cacheable.
+    uint32_t region_bytes = 1UL << (mpu_size(size_bytes) + 1U);
+    ASSERT(((uint32_t)base_address & (region_bytes - 1U)) == 0U);
+
     MPU_Region_InitTypeDef r = { 0 };
 
     HAL_MPU_Disable();

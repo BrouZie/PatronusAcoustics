@@ -226,7 +226,18 @@ SECTIONS
       PROVIDE( __bss_end = .);
   } >DTCMRAM
 
-  /* Raw audio buffer in RAM_D1 */
+  /* DMA buffers in RAM_D1 that get their own non-cacheable MPU region.
+   * MPU regions must be aligned to their size, and everything inside one is
+   * non-cacheable, so pad to keep other data out. Keep in sync with DMA_BUF
+   * in src/config/linker.h. */
+  .dma_buf (NOLOAD) :
+  {
+	  . = ALIGN(16K);
+	  *(.dma_buf)
+	  . = ALIGN(16K);
+  } >RAM_D1
+
+  /* General purpose buffers in RAM_D1 */
   .d1_buf (NOLOAD) :
   {
 	  . = ALIGN(32);
