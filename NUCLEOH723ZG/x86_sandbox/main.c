@@ -20,11 +20,11 @@ global AngleDeg SourceDirection = {
     .el = 30.0f
 };
 global const MicArray MicPositions = { {
-    { 0.0000000f, 0.1335750f, 0.0f },
-    { 0.1270370f, 0.0412770f, 0.0f },
-    { 0.0785130f, -0.108064f, 0.0f },
-    { -0.078513f, -0.108064f, 0.0f },
-    { -0.127037f, 0.0412770f, 0.0f },
+    { -0.078513f, -0.108064f, 0.0f }, // mic 0: lower left
+    {  0.078513f, -0.108064f, 0.0f }, // mic 1: lower right
+    {  0.127037f,  0.041277f, 0.0f }, // mic 2: right
+    {  0.000000f,  0.133575f, 0.0f }, // mic 3: top
+    { -0.127037f,  0.041277f, 0.0f }, // mic 4: left
 } };
 
 global PrevAudioFrame Prev;
@@ -39,10 +39,9 @@ global const SRP_Grid Grid = {
 
 #ifdef LOGMEL
 
-#define LOGMEL_MAGIC               0x4C454D4C
+#define LOGMEL_MAGIC               0x314C4D4C // "LML1": one packet per frame
 #define LOGMEL_Q_SCALE             1.5f
 #define LOGMEL_Q_OFFSET            -100.0f
-#define NUM_FRAMES                 61
 static inline uint8_t quantize_db(float32_t db)
 {
     float32_t byte_value = (db - LOGMEL_Q_OFFSET) * LOGMEL_Q_SCALE;
@@ -53,14 +52,18 @@ static inline uint8_t quantize_db(float32_t db)
 
 typedef struct {
     uint32_t magic;       // LOGMEL_MAGIC
-    uint32_t seq;         // increments every image; used to detect drops
+    uint32_t seq;         // increments every frame; used to detect drops
     float32_t azimuth;
     float32_t elevation;
 } logmel_header_t;
 
-global Logmel  Mel;
-global uint8_t MelPackets[NUM_MEL_BANDS];
-global uint8_t FirstPacket[sizeof(logmel_header_t) + NUM_MEL_BANDS];
+typedef struct {
+    logmel_header_t header;
+    uint8_t         cells[NUM_MEL_BANDS];
+} logmel_packet_t;
+
+global Logmel          Mel;
+global logmel_packet_t Packet;
 
     #ifdef BEAMFORM
 global float32_t BeamSpectrum[DSP_BUFFER_LEN];
@@ -86,8 +89,7 @@ int main()
     int vusart = open_vusart("/tmp/ttySIM0");
 #endif
 
-    uint16_t frame_idx = 0;
-    uint32_t seq       = 0;
+    uint32_t seq = 0;
 #endif
 
 #ifdef BENCHMARK
@@ -117,44 +119,19 @@ int main()
         const float32_t* mel_input = Spec.bins[0];
     #endif
         dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
-        uint8_t* out = MelPackets;
-        uint8_t* cells;
-
-        if (frame_idx == 0)
+        Packet.header = (logmel_header_t) {
+            .magic     = LOGMEL_MAGIC,
+            .seq       = seq++,
+            .azimuth   = Srp.azimuth,
+            .elevation = Srp.elevation,
+        };
+        for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
         {
-            logmel_header_t* hdr = (logmel_header_t*)FirstPacket;
-            *hdr                 = (logmel_header_t) {
-                .magic     = LOGMEL_MAGIC,
-                .seq       = seq,
-                .azimuth   = Srp.azimuth,
-                .elevation = Srp.elevation,
-            };
-            cells = FirstPacket + sizeof(logmel_header_t);
-            for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
-            {
-                cells[b] = quantize_db(Mel.frame[b]);
-            }
+            Packet.cells[b] = quantize_db(Mel.frame[b]);
+        }
     #ifndef BENCHMARK
-            vusart_send(vusart, FirstPacket, sizeof(logmel_header_t) + NUM_MEL_BANDS);
+        vusart_send(vusart, &Packet, sizeof(Packet));
     #endif
-        }
-        else
-        {
-            cells = out;
-            for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
-            {
-                cells[b] = quantize_db(Mel.frame[b]);
-            }
-    #ifndef BENCHMARK
-            vusart_send(vusart, cells, NUM_MEL_BANDS);
-    #endif
-        }
-
-        if (++frame_idx == NUM_FRAMES)
-        {
-            frame_idx = 0;
-            seq++;
-        }
 #endif // LOGMEL END
 #ifdef BENCHMARK
         struct timespec end_time;
@@ -172,7 +149,7 @@ int main()
         last_cycle_count = _rdtsc();
 #endif
 #ifndef BENCHMARK
-        // usleep(30840); // control the tx frequency
+        usleep(30840); // control the tx frequency
 #endif
     }
 

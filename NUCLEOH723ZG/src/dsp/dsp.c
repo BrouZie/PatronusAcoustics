@@ -15,21 +15,20 @@ _Static_assert(SRP_LAG_WINDOW <= DSP_BUFFER_LEN / 2, "Lag window wider than IFFT
 _Static_assert((int)SAMPLE_RATE_HZ == 16000,   "mel_fbank.h generated for 16 kHz");
 _Static_assert(DSP_BUFFER_LEN == 1024,         "mel_fbank.h generated for n_fft=1024");
 
-global arm_rfft_fast_instance_f32 g_Rfft;
-
-global float32_t g_HannConstants[DSP_BUFFER_LEN];
+global arm_rfft_fast_instance_f32 Rfft;
+global float32_t HannConstants[DSP_BUFFER_LEN];
 
 internal inline void populate_hann(void)
 {
     for (uint32_t i = 0; i < AUDIO_SAMPLES * 2; ++i)
     {
-        g_HannConstants[i] = 0.5f * (1.0f - arm_cos_f32(2.0f * PI * (float32_t)i / ((float32_t)AUDIO_SAMPLES * 2)));
+        HannConstants[i] = 0.5f * (1.0f - arm_cos_f32(2.0f * PI * (float32_t)i / ((float32_t)AUDIO_SAMPLES * 2)));
     }
 }
 
 void dsp_init_spectrum(void)
 {
-    arm_rfft_fast_init_f32(&g_Rfft, DSP_BUFFER_LEN);
+    arm_rfft_fast_init_f32(&Rfft, DSP_BUFFER_LEN);
     populate_hann();
 }
 
@@ -52,10 +51,10 @@ void dsp_compute_spectrum(const AudioFrame* frame, PrevAudioFrame* prev, FFT_Spe
         arm_offset_f32(spec->scratch, -mean, spec->scratch, DSP_BUFFER_LEN);
 
         // Hann window applied
-        arm_mult_f32(spec->scratch, g_HannConstants, spec->scratch, DSP_BUFFER_LEN);
+        arm_mult_f32(spec->scratch, HannConstants, spec->scratch, DSP_BUFFER_LEN);
 
         // Actual fft
-        arm_rfft_fast_f32(&g_Rfft, spec->scratch, spec->bins[mic_idx], 0);
+        arm_rfft_fast_f32(&Rfft, spec->scratch, spec->bins[mic_idx], 0);
     }
 }
 
@@ -179,7 +178,7 @@ void dsp_compute_srp(const SRP_State* state, FFT_Spectrum* spec, SRP_PHAT* srp)
             spec->scratch[spec_idx + 1] = imag / denom;
         }
         #define INVERSE_FFT 1
-        arm_rfft_fast_f32(&g_Rfft, spec->scratch, srp->ifft_out, INVERSE_FFT);
+        arm_rfft_fast_f32(&Rfft, spec->scratch, srp->ifft_out, INVERSE_FFT);
 
         // Keep only lags [-MAX_LAG, MAX_LAG + 1]; negative lags wrap to the end of the IFFT output
         float32_t* row = srp->correlations[pair_idx];

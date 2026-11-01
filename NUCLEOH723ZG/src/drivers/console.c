@@ -34,7 +34,6 @@
 // Output buffer and flags
 static uint32_t _output_buffer[2];
 static uint32_t _output_buffer_size;
-static uint32_t _fill_offset[2] = {0, 0};
 static uint32_t _pending_size   = 0;
 
 static volatile uint8_t _dma_active_idx = 0;
@@ -70,20 +69,14 @@ void MDMA_transfer_complete(MDMA_HandleTypeDef* hmdma)
     (void)hmdma;
     _mdma_busy = 0;
 
+    // Each send goes out as soon as it's copied
     uint8_t idx = _pending_fill_idx;
-    _fill_offset[idx] += _pending_size;
-
-    if (_fill_offset[idx] < _output_buffer_size) {
-        return; // half not full yet — wait for the next UART_MDMA_send_buffer() call
-    }
-	
-	_fill_offset[idx] = 0;
 
     _dma_active_idx = idx;
     _dma_busy       = 1;
     huart3.Instance->CR3 |= USART_CR3_DMAT;
     HAL_DMA_Start_IT(&USART_DMA_HANDLE, _output_buffer[_dma_active_idx], (uint32_t)&huart3.Instance->TDR,
-                     _output_buffer_size);
+                     _pending_size);
 }
 
 /* --------- DMA & MDMA --------- */
@@ -102,15 +95,20 @@ void UART_DMA_start(uint32_t output_buffer, uint32_t size)
 
 void UART_MDMA_send_buffer(const void* dtcm_block, uint32_t size)
 {
+    // Must fit one half of the buffer given to UART_DMA_start()
+    if (size > _output_buffer_size) {
+        __builtin_trap();
+    }
+
+    // Blocks while the previous send is on the wire
+    while (_mdma_busy || _dma_busy) { }
     uint8_t fill_idx = 1 - _dma_active_idx;
-    while (_dma_busy && fill_idx == _dma_active_idx) { }
-    while (_mdma_busy) { }
 
     _pending_fill_idx = fill_idx;
 	_pending_size     = size;
     _mdma_busy        = 1;
 
 
-    uint32_t dest = _output_buffer[fill_idx] + _fill_offset[fill_idx];
+    uint32_t dest = _output_buffer[fill_idx];
     HAL_MDMA_Start_IT(&USART_MDMA_HANDLE, (uint32_t)dtcm_block, dest, size, 1);
 }

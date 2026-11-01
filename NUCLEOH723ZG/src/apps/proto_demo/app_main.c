@@ -23,25 +23,30 @@
 
 // LOGMEL SHIT START
 #define LOGMEL_FRAME_DTCM_BUF     ".dtcm_buf" // -> DTCMRAM
-#define LOGMEL_MAGIC               0x4C454D4C
+#define LOGMEL_MAGIC               0x314C4D4C // "LML1": one packet per frame
 #define LOGMEL_Q_SCALE             1.5f
 #define LOGMEL_Q_OFFSET            -100.0f
-#define NUM_FRAMES                 61
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;       // LOGMEL_MAGIC
-    uint32_t seq;         // increments every image; used to detect drops
+    uint32_t seq;         // increments every frame; used to detect drops
     float32_t azimuth;
     float32_t elevation;
 } logmel_header_t;
 
+typedef struct __attribute__((packed)) {
+    logmel_header_t header;
+    uint8_t         cells[NUM_MEL_BANDS];
+} logmel_packet_t;
+
+// MDMA writes doublewords, so every send must be a multiple of 8 bytes
+_Static_assert(sizeof(logmel_packet_t) % 8 == 0, "logmel_packet_t must be a multiple of 8 bytes");
+
 static uint8_t  _active_write_buf  = 0;
 
-/* Header is only needed for the first frame; omit it from the ping-pong buffer. */
-static uint8_t _logmel_first_frame[sizeof(logmel_header_t) + NUM_MEL_BANDS]
-    __attribute__((section(LOGMEL_FRAME_DTCM_BUF), aligned(32)));
-static uint8_t _logmel_frame[2][NUM_MEL_BANDS] __attribute__((section(LOGMEL_FRAME_DTCM_BUF), aligned(32)));
-static uint8_t _logmel_spectogram[2][sizeof(logmel_header_t) + NUM_FRAMES * NUM_MEL_BANDS] DMA_BUF;
+// Ping-pong, so the MDMA can still be reading one packet while the next is built
+static logmel_packet_t _logmel_packet[2] __attribute__((section(LOGMEL_FRAME_DTCM_BUF), aligned(32)));
+static uint8_t _logmel_tx[2][sizeof(logmel_packet_t)] DMA_BUF;
 
 global Logmel Mel DTCM;
 
@@ -70,13 +75,11 @@ global const MicArray MicPositions = { {
 
 // TODO: Benchmark different placements and
 // look for ways to reduce memory footprint
-global AudioFrameView View;
-global PrevAudioFrame Prev DTCM; // NOTE: Interesting to benchmark
-
-global FFT_Spectrum Spec RAM1;
-
+global AudioFrameView View  DTCM;
+global PrevAudioFrame Prev  DTCM;
+global FFT_Spectrum   Spec  RAM1; // slight penalty (~0.10ms) for placing 
+global SRP_State      State RAM1; // these two in RAM1 instead of DTCM
 global SRP_PHAT       Srp   DTCM;
-global SRP_State      State RAM1;
 global const SRP_Grid Grid = {
     .az_start = -45.0f, .az_step = 1.0f,
     .el_start = -45.0f, .el_step = 1.0f
@@ -93,11 +96,10 @@ void app_main(void)
 #endif // NOT LOGMEL
 #ifdef LOGMEL
     #ifndef BENCHMARK
-    UART_DMA_start((uint32_t)_logmel_spectogram, sizeof(_logmel_spectogram[0]));
+    UART_DMA_start((uint32_t)_logmel_tx, sizeof(_logmel_tx[0]));
     #endif
 
-    uint16_t frame_idx = 0;
-    uint32_t seq       = 0;
+    uint32_t seq = 0;
 #endif // LOGMEL
 
     uint32_t last_seq = 0;
@@ -134,45 +136,21 @@ void app_main(void)
         const float32_t* mel_input = Spec.bins[0];
     #endif
         dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
-        uint8_t* out = _logmel_frame[_active_write_buf];
-        uint8_t* cells;
-
-        if (frame_idx == 0)
+        logmel_packet_t* packet = &_logmel_packet[_active_write_buf];
+        packet->header = (logmel_header_t) {
+            .magic     = LOGMEL_MAGIC,
+            .seq       = seq++,
+            .azimuth   = Srp.azimuth,
+            .elevation = Srp.elevation,
+        };
+        for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
         {
-            logmel_header_t* hdr = (logmel_header_t*)_logmel_first_frame;
-            *hdr                 = (logmel_header_t) {
-                .magic     = LOGMEL_MAGIC,
-                .seq       = seq,
-                .azimuth   = Srp.azimuth,
-                .elevation = Srp.elevation,
-            };
-            cells = _logmel_first_frame + sizeof(logmel_header_t);
-            for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
-            {
-                cells[b] = quantize_db(Mel.frame[b]);
-            }
+            packet->cells[b] = quantize_db(Mel.frame[b]);
+        }
     #ifndef BENCHMARK
-            UART_MDMA_send_buffer(_logmel_first_frame, sizeof(logmel_header_t) + NUM_MEL_BANDS);
+        UART_MDMA_send_buffer(packet, sizeof(*packet));
     #endif
-        }
-        else
-        {
-            cells = out;
-            for (uint32_t b = 0; b < NUM_MEL_BANDS; b++)
-            {
-                cells[b] = quantize_db(Mel.frame[b]);
-            }
-    #ifndef BENCHMARK
-            UART_MDMA_send_buffer(cells, NUM_MEL_BANDS);
-    #endif
-            _active_write_buf ^= 1U;
-        }
-
-        if (++frame_idx == NUM_FRAMES)
-        {
-            frame_idx = 0;
-            seq++;
-        }
+        _active_write_buf ^= 1U;
 #endif // LOGMEL
 #ifdef BENCHMARK
         uint32_t end_cycle_count = clock_cycles();

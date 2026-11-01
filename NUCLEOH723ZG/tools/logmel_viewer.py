@@ -3,20 +3,20 @@ CNN-pipeline variant.
 
 Geometry, rate, and quantization are fixed by the trained model, so they're
 compile-time constants here (mirrored in firmware) rather than fields on the
-wire. The packet header is now just a magic word (sync + format-version
-guard) and a sequence number (drop detection):
+wire. The board sends one packet per frame:
 
     struct __attribute__((packed)) {
-        uint32_t magic;   // must be LOGMEL_MAGIC
-        uint32_t seq;     // increments every image; used to detect drops
-    };                    // 8 bytes
+        uint32_t magic;      // must be LOGMEL_MAGIC
+        uint32_t seq;        // increments every frame; used to detect drops
+        float    azimuth;
+        float    elevation;
+        uint8_t  cells[128]; // one spectrogram column
+    };                       // 144 bytes
 
 Bump MAGIC whenever FRAMES/BANDS/RATE/HOP/FFT/quant range change, so a stale
 binary can never feed the CNN a shape it wasn't trained on.
 
-An image is a second of audio delivered in a ~66 ms burst, so columns are
-queued and drawn at the rate they were captured: the picture scrolls
-smoothly, one image behind the board, instead of lurching once a second.
+Columns are drawn as soon as they arrive, about one frame behind the board.
 
     uv run tools/logmel_viewer_cnn.py
 """
@@ -53,31 +53,29 @@ HOP = 512                    # hop size in samples between frames
 MIN_FREQ = 100                # Hz
 MAX_FREQ = 8000              # Hz
 FFT = 1024                    # FFT size used
-Q_SCALE = 2.83               # dequant: db = byte / Q_SCALE + Q_OFFSET
-Q_OFFSET = -80.0
+Q_SCALE = 1.5                # dequant: db = byte / Q_SCALE + Q_OFFSET
+Q_OFFSET = -100.0
 
 # These values needs to match with the ones in STM32
 
-MAGIC = 0x4C454D4C
+MAGIC = 0x314C4D4C             # "LML1"
 MAGIC_BYTES = struct.pack("<I", MAGIC)
 HDR = struct.Struct("<IIff")           # magic, seq, azimuth, elevation
 HDR_SIZE = HDR.size                    # 16
-PACKET_SIZE = HDR_SIZE + FRAMES * BANDS
+PACKET_SIZE = HDR_SIZE + BANDS         # one packet per frame
 
 port = None
 buf = bytearray()
 pending = deque()               # columns waiting to be drawn
 img = img_rect = centers = None
-cols_per_tick = 1.0
-credit = 0.0                    # fractional columns owed to the display
-idle_ticks = nbytes = nimages = ndropped = 0
+idle_ticks = nbytes = ncolumns = ndropped = 0
 last_seq = None
 sample_bytes = bytearray()      # first bytes seen, for the no-header diagnostic
 
 
 
 def find_packet():
-    """(seq, image) of the next complete buffered packet, or None. Sheds
+    """(seq, column) of the next complete buffered packet, or None. Sheds
     bytes ahead of the first plausible magic so junk cannot accumulate."""
     start = 0
     while True:
@@ -99,8 +97,7 @@ def find_packet():
         # and block the del below.
         cells = np.frombuffer(bytes(buf[HDR_SIZE:PACKET_SIZE]), np.uint8)
         del buf[:PACKET_SIZE]
-        image = cells.reshape(FRAMES, BANDS).astype(np.float32)
-        return seq, image / Q_SCALE + Q_OFFSET
+        return seq, cells.astype(np.float32) / Q_SCALE + Q_OFFSET
 
 
 def mel_centers_hz():
@@ -123,11 +120,10 @@ def mel_centers_hz():
 def configure():
     """Geometry is fixed by the model, so the view can be sized before the
     first packet ever arrives."""
-    global img, img_rect, centers, cols_per_tick
+    global img, img_rect, centers
 
     centers = mel_centers_hz()
     per_s = RATE / HOP
-    cols_per_tick = per_s * TICK_MS / 1000.0
     img = np.full((max(FRAMES, int(SECONDS_SHOWN * per_s)), BANDS),
                   Q_OFFSET, dtype=np.float32)
     img_rect = QtCore.QRectF(0, 0, SECONDS_SHOWN, BANDS)
@@ -141,26 +137,20 @@ def configure():
                   f"({per_s:.1f} col/s) | {MIN_FREQ}-{MAX_FREQ} Hz | "
                   f"{10.0 / Q_SCALE:.2f} dB/step")
 
-    secs = FRAMES * HOP / RATE
-    print(f"{FRAMES} x {BANDS} image every {secs:.2f} s ({per_s:.2f} col/s); "
-          f"packet {PACKET_SIZE} B = {PACKET_SIZE * 10 / BAUD * 1e3:.0f} ms on the wire, "
-          f"{PACKET_SIZE * 10 / secs / BAUD * 100:.1f}% of the link")
+    print(f"{per_s:.2f} col/s; "
+          f"packet {PACKET_SIZE} B = {PACKET_SIZE * 10 / BAUD * 1e3:.1f} ms on the wire, "
+          f"{PACKET_SIZE * 10 * per_s / BAUD * 100:.1f}% of the link")
 
 
 def redraw():
-    """Move queued columns into the image at the rate they were captured, then
-    paint it."""
-    global img, credit
+    """Move every column received so far into the image, then paint it."""
+    global img
 
-    if pending:
-        # Catch up rather than fall further behind if the queue is running long.
-        credit += cols_per_tick * (2 if len(pending) > 2 * FRAMES else 1)
-        n = int(credit)
-        if n > 0:
-            credit -= n
-            n = min(n, len(pending))
-            img = np.roll(img, -n, axis=0)
-            img[-n:] = [pending.popleft() for _ in range(n)]
+    n = min(len(pending), img.shape[0])
+    if n > 0:
+        img = np.roll(img, -n, axis=0)
+        img[-n:] = list(pending)[-n:]
+        pending.clear()
 
     if AUTO_LEVELS:
         lo, hi = np.percentile(img, (2.0, 99.8))
@@ -177,8 +167,8 @@ def status():
     if idle_ticks < IDLE_TICKS:
         peak = int(np.argmax(img[-1]))
         drop = f"  dropped {ndropped}" if ndropped else ""
-        label.setText(f"images {nimages}{drop} | seq {last_seq} | "
-                      f"queue {len(pending)} | peak band {peak} "
+        label.setText(f"columns {ncolumns}{drop} | seq {last_seq} | "
+                      f"peak band {peak} "
                       f"({centers[peak]:.0f} Hz)")
         return
     # Say which half of the link is at fault: silence is a port/flash problem,
@@ -188,13 +178,13 @@ def status():
                       "is the log-mel app the one flashed, and is this the right device?")
     else:
         label.setText(f"{nbytes} bytes arriving but no valid header - expected magic "
-                      f"{MAGIC_BYTES.hex(' ')} ('LMEL'). If the board's geometry/rate/quant "
+                      f"{MAGIC_BYTES.hex(' ')} ('LML1'). If the board's geometry/rate/quant "
                       f"were retrained, bump MAGIC here to match. "
                       f"First bytes: {sample_bytes.hex(' ')}")
 
 
 def poll():
-    global idle_ticks, nbytes, nimages, ndropped, last_seq
+    global idle_ticks, nbytes, ncolumns, ndropped, last_seq
 
     chunk = port.read(port.in_waiting or 1)
     nbytes += len(chunk)
@@ -203,12 +193,12 @@ def poll():
 
     got = 0
     while (packet := find_packet()) is not None:
-        seq, image = packet
+        seq, column = packet
         if last_seq is not None:
             ndropped += seq - last_seq - 1
         last_seq = seq
-        nimages += 1
-        pending.extend(image)
+        ncolumns += 1
+        pending.append(column)
         got += 1
 
     idle_ticks = 0 if got else idle_ticks + 1

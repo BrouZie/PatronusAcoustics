@@ -37,7 +37,8 @@ class Config:
     # PORT     = "/tmp/ttySIM0"
     PORT = "/dev/ttyACM0"
     BAUDRATE = 921600
-    MAGIC    = 0x4C454D4C # Used to detect when new image is incoming
+    MAGIC    = 0x314C4D4C # "LML1": starts every packet, one packet per frame (must match firmware)
+    INFERENCE_STRIDE = 8  # Frames between predictions (8 * 32 ms = 256 ms)
 
     # Q_SCALE and Q_OFFSET is used to send data efficiently from MCU to CNN pipeline
     Q_SCALE  = 1.50    # dequant: db = byte / Q_SCALE + Q_OFFSET
