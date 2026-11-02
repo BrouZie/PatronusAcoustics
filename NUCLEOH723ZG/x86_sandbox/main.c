@@ -146,7 +146,7 @@ int main()
         printf("%.02fms/f, %.02ff/s, %.02fmc/f\r\n", elapsed_time_ms, fps, mcpf);
 
         clock_gettime(CLOCK_MONOTONIC, &last_time);
-        last_cycle_count = _rdtsc();
+        last_cycle_count = end_cycle_count;
 #endif
 #ifndef BENCHMARK
         usleep(30840); // control the tx frequency

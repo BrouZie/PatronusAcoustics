@@ -7,8 +7,7 @@
 
 #define BENCHMARK
 #ifdef BENCHMARK
-#include "clock.h"
-#include <stdio.h>
+#include "arm_bench.h"
 #endif
 
 global AudioFrameView View  DTCM;
@@ -37,16 +36,7 @@ void app_main(void)
     dsp_init_spectrum();
     dsp_init_srp(&Grid, &MicPositions, &State);
 
-#ifdef BENCHMARK
-    clock_cycles_init();
-    float hz = clock_hz();
-
-    float avg_fps  = 0;
-    float avg_ms   = 0;
-    float avg_mcpf = 0;
-
-    uint32_t iter = 0;
-#endif
+    BENCH_SETUP("DSP");
 
     uint32_t last_seq;
 
@@ -58,37 +48,18 @@ void app_main(void)
             continue;
         }
 
-#ifdef BENCHMARK
-        uint32_t start_cycle_count = clock_cycles();
-#endif
-        dsp_compute_spectrum(View.frame, &Prev, &Spec);
-        dsp_compute_srp(&State, &Spec, &Srp);
-        dsp_beamform_delay_sum(&Spec, &MicPositions, Srp.azimuth, Srp.elevation, BeamSpectrum);
-        const float32_t* mel_input = BeamSpectrum;
-        dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
-#ifdef BENCHMARK
-        uint32_t end_cycle_count = clock_cycles();
-        uint32_t delta_cycles = end_cycle_count - start_cycle_count;
-
-        float elapsed_time = (float)delta_cycles * 1000.0f / hz;
-        float fps          = hz / (float)delta_cycles;
-        float mcpf         = (float)delta_cycles / 1e6f;
-
-        avg_ms   += elapsed_time;
-        avg_fps  += fps;
-        avg_mcpf += mcpf;
-
-        if (iter % 100 == 0)
+        for (int i = 0; i < 100; ++i)
         {
-            avg_ms   /= 100.0f;
-            avg_fps  /= 100.0f;
-            avg_mcpf /= 100.0f;
-            printf("%.02fms/f, %.02ff/s, %.02fmc/f\r\n", avg_ms, avg_fps, avg_mcpf);
-
-            avg_ms = avg_fps = avg_mcpf = 0;
+            BENCH_BEGIN(DSP);
+            dsp_compute_spectrum(View.frame, &Prev, &Spec);
+            dsp_compute_srp(&State, &Spec, &Srp);
+            dsp_beamform_delay_sum(&Spec, &MicPositions, Srp.azimuth, Srp.elevation, BeamSpectrum);
+            const float32_t* mel_input = BeamSpectrum;
+            dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
+            BENCH_END(DSP);
         }
-        ++iter;
-#endif
+        bench_report();
+
         last_seq = View.seq;
     }
 }

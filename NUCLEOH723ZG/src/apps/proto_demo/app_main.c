@@ -165,7 +165,7 @@ void app_main(void)
         // DSP pipeline should ideally have a higher fps rate ~25% higher (to provide some headroom).
         printf("%.02fms/f, %.02ff/s, %.02fmc/f\r\n", elapsed_time, fps, mcpf);
 
-        last_cycle_count = clock_cycles();
+        last_cycle_count = end_cycle_count;
 #endif
         last_seq = View.seq;
     }
