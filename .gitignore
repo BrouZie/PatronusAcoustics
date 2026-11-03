@@ -20,6 +20,9 @@ output/
 DroneAudioDataset/
 *.npz
 
+# Data
+data/
+
 # Simulation results cache (regenerable, keyed by config hash)
 py-simulation/results/cache/
 
