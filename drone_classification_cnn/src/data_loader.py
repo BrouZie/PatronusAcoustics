@@ -21,8 +21,7 @@ import torchaudio
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
-from src.data_ingestion import DataIngestion
-
+from src.data_discovery import DatasetDiscovery
 
 class LogMelSpectrogram(nn.Module):
     """
@@ -303,6 +302,7 @@ class DroneAudioDataset(Dataset):
 
 
 def get_data_loaders(
+    dataset_name: str,
     batch_size: int = Config.BATCH_SIZE,
     num_workers: int = Config.NUM_WORKERS,
     train_ratio: float = Config.TRAIN_RATIO,
@@ -321,14 +321,9 @@ def get_data_loaders(
         Tuple of (train_loader, val_loader, test_loader, class_weights)
     """
     # Get dataset files
-    ingestion = DataIngestion()
+    discovery = DatasetDiscovery(dataset_name)
 
-    # Ensure data is available
-    if not ingestion.dataset_path.exists():
-        print("[INFO] Dataset not found. Running ingestion...")
-        ingestion.clone_repository()
-
-    drone_files, background_files = ingestion.get_all_audio_files()
+    drone_files, background_files = discovery.get_all_audio_files()
 
     if len(drone_files) == 0 or len(background_files) == 0:
         raise ValueError("Dataset is empty or not properly downloaded!")
@@ -397,11 +392,12 @@ def get_data_loaders(
 
 
 if __name__ == "__main__":
-    # Test the data loader
+    # This is only a test and not relevant to main pipeline.
+    # Fill in dataset name in get_data_loader("dataset_name") with real name to run the test
     print("\n[TEST] Testing DroneAudioDataset...")
 
     try:
-        train_loader, val_loader, test_loader, weights = get_data_loaders(batch_size=4)
+        train_loader, val_loader, test_loader, weights = get_data_loaders("dataset_name", batch_size=4)
 
         # Get a sample batch
         for batch_x, batch_y in train_loader:

@@ -1,6 +1,5 @@
 """
-SudarshanChakra - Training Module
-Production-grade training pipeline with defense-optimized evaluation.
+Training Module
 
 Features:
 - Early stopping with patience
@@ -110,6 +109,7 @@ class Trainer:
         test_loader: DataLoader,
         class_weights: Optional[torch.Tensor] = None,
         device: Optional[torch.device] = None,
+        model_name: str = "best_model",
     ):
         self.device = device or Config.get_device()
         self.model = model.to(self.device)
@@ -158,7 +158,7 @@ class Trainer:
 
         # Best model tracking
         self.best_val_loss = float("inf")
-        self.best_model_path = Config.MODEL_DIR / "best_model.pth"
+        self.best_model_path = Config.MODEL_DIR / f"{model_name}.pth"
 
         # Create output directories
         Config.create_directories()
@@ -272,7 +272,7 @@ class Trainer:
             Training history dictionary
         """
         print("\n" + "=" * 60)
-        print("SUDARSHANchakra - TRAINING INITIATED")
+        print("TRAINING INITIATED")
         print("=" * 60)
         print(f"Device: {self.device}")
         print(f"Epochs: {num_epochs}")
@@ -398,7 +398,7 @@ class Trainer:
 
         return test_metrics
 
-    def plot_confusion_matrix(self, test_metrics: Dict) -> None:
+    def plot_confusion_matrix(self, test_metrics: Dict, model_name) -> None:
         """Generate and save confusion matrix plot."""
         cm = confusion_matrix(test_metrics["labels"], test_metrics["predictions"])
 
@@ -412,7 +412,7 @@ class Trainer:
             yticklabels=Config.CLASS_NAMES,
             annot_kws={"size": 16},
         )
-        plt.title("SUDARSHANchakra - Threat Detection Confusion Matrix", fontsize=14)
+        plt.title("Threat Detection Confusion Matrix", fontsize=14)
         plt.ylabel("Actual", fontsize=12)
         plt.xlabel("Predicted", fontsize=12)
 
@@ -427,13 +427,13 @@ class Trainer:
         )
 
         plt.tight_layout()
-        save_path = Config.PLOTS_DIR / "confusion_matrix.png"
+        save_path = Config.PLOTS_DIR / f"{model_name}confusion_matrix.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
 
         print(f"\n[SAVED] Confusion matrix: {save_path}")
 
-    def plot_training_history(self) -> None:
+    def plot_training_history(self, model_name) -> None:
         """Generate and save training history plots."""
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -473,10 +473,10 @@ class Trainer:
         axes[1, 1].set_yscale("log")
         axes[1, 1].grid(True, alpha=0.3)
 
-        plt.suptitle("SUDARSHANchakra - Training Progress", fontsize=14)
+        plt.suptitle("Training Progress", fontsize=14)
         plt.tight_layout()
 
-        save_path = Config.PLOTS_DIR / "training_history.png"
+        save_path = Config.PLOTS_DIR / f"{model_name}_training_history.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
 
@@ -513,10 +513,9 @@ class Trainer:
         print(f"[SAVED] Training report: {save_path}")
 
 
-def run_training():
+def run_training(dataset_name: str):
     """Execute complete training pipeline."""
     print("\n" + "=" * 60)
-    print("SUDARSHANchakra - ACOUSTIC UAV THREAT DETECTION")
     print("Training Pipeline Initialization")
     print("=" * 60)
 
@@ -526,7 +525,7 @@ def run_training():
 
     # Get data loaders
     print("\n[STEP 1] Loading dataset...")
-    train_loader, val_loader, test_loader, class_weights = get_data_loaders()
+    train_loader, val_loader, test_loader, class_weights = get_data_loaders(dataset_name=dataset_name)
 
     # Create model
     print("\n[STEP 2] Initializing model...")
@@ -539,6 +538,7 @@ def run_training():
         val_loader=val_loader,
         test_loader=test_loader,
         class_weights=class_weights,
+        model_name=dataset_name,
     )
 
     # Train
@@ -551,8 +551,8 @@ def run_training():
 
     # Generate visualizations
     print("\n[STEP 5] Generating reports...")
-    trainer.plot_confusion_matrix(test_metrics)
-    trainer.plot_training_history()
+    trainer.plot_confusion_matrix(test_metrics, dataset_name)
+    trainer.plot_training_history(dataset_name)
     trainer.save_training_report(test_metrics)
 
     print("\n" + "=" * 60)
@@ -564,4 +564,6 @@ def run_training():
 
 
 if __name__ == "__main__":
-    run_training()
+    if len(sys.argv) < 2:
+        sys.exit("Usage: python src/train.py <dataset_name>")
+    run_training(sys.argv[1])
