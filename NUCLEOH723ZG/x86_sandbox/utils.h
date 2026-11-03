@@ -15,7 +15,7 @@
 //         }
 //     }
 // }
-// write_audio_to_disk(contiguous_samples, MIC_COUNT, num_blocks, "x86_sandbox/data/test.wav");
+// write_audio_to_disk(contiguous_samples, MIC_COUNT, num_blocks, "x86_sandbox/data/test.wav", WAV_INT16);
 
 #ifndef UTILS_H
 #define UTILS_H
@@ -31,23 +31,46 @@
 #include <termios.h>
 #include <pty.h>
 
-#define WAV_FORMAT(type) _Generic((type), \
-    int16_t:   DR_WAVE_FORMAT_PCM,        \
-    int32_t:   DR_WAVE_FORMAT_PCM,        \
-    float32_t: DR_WAVE_FORMAT_IEEE_FLOAT  \
-)
+typedef enum
+{
+    WAV_FLOAT32,
+    WAV_INT16,
+    WAV_INT32,
+} WavFormatType;
 
 // Writes interleaved samples (data[frame * num_mics + mic]) to a WAV file at SAMPLE_RATE_HZ.
 // num_blocks: number of AUDIO_SAMPLES-long blocks. sample_t must be int16_t, int32_t or float32_t.
-static inline void write_audio_to_disk(sample_t* data, int num_mics, int num_blocks, const char* filepath)
+static inline void write_audio_to_disk(void* data, int num_mics, int num_blocks, const char* filepath, WavFormatType type)
 {
+    drwav_uint32 bytes_per_sample;
+    drwav_uint32 fmt_type;
+
+    switch (type)
+    {
+        case WAV_FLOAT32:
+        {
+            fmt_type         = DR_WAVE_FORMAT_IEEE_FLOAT;
+            bytes_per_sample = sizeof(float32_t);
+        } break;
+        case WAV_INT32:
+        {
+            fmt_type         = DR_WAVE_FORMAT_PCM;
+            bytes_per_sample = sizeof(int32_t);
+        } break;
+        case WAV_INT16:
+        {
+            fmt_type         = DR_WAVE_FORMAT_PCM;
+            bytes_per_sample = sizeof(int16_t);
+        } break;
+    }
+
     drwav wav = {};
     drwav_data_format format = {
         .container     = drwav_container_riff,
-        .format        = WAV_FORMAT(data[0]),
+        .format        = fmt_type,
         .channels      = (uint32_t)num_mics,
         .sampleRate    = (uint32_t)SAMPLE_RATE_HZ,
-        .bitsPerSample = sizeof(sample_t) * 8,
+        .bitsPerSample = bytes_per_sample * 8,
     };
 
     drwav_init_file_write(&wav, filepath, &format, NULL);
