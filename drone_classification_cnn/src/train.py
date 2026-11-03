@@ -398,7 +398,7 @@ class Trainer:
 
         return test_metrics
 
-    def plot_confusion_matrix(self, test_metrics: Dict) -> None:
+    def plot_confusion_matrix(self, test_metrics: Dict, model_name) -> None:
         """Generate and save confusion matrix plot."""
         cm = confusion_matrix(test_metrics["labels"], test_metrics["predictions"])
 
@@ -427,13 +427,13 @@ class Trainer:
         )
 
         plt.tight_layout()
-        save_path = Config.PLOTS_DIR / "confusion_matrix.png"
+        save_path = Config.PLOTS_DIR / f"{model_name}confusion_matrix.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
 
         print(f"\n[SAVED] Confusion matrix: {save_path}")
 
-    def plot_training_history(self) -> None:
+    def plot_training_history(self, model_name) -> None:
         """Generate and save training history plots."""
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -476,7 +476,7 @@ class Trainer:
         plt.suptitle("Training Progress", fontsize=14)
         plt.tight_layout()
 
-        save_path = Config.PLOTS_DIR / "training_history.png"
+        save_path = Config.PLOTS_DIR / f"{model_name}_training_history.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
 
