@@ -551,8 +551,8 @@ def run_training(dataset_name: str):
 
     # Generate visualizations
     print("\n[STEP 5] Generating reports...")
-    trainer.plot_confusion_matrix(test_metrics)
-    trainer.plot_training_history()
+    trainer.plot_confusion_matrix(test_metrics, dataset_name)
+    trainer.plot_training_history(dataset_name)
     trainer.save_training_report(test_metrics)
 
     print("\n" + "=" * 60)
