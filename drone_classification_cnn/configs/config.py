@@ -86,13 +86,13 @@ class Config:
     THREAT_LABEL = 1
 
     # ===========================================
-    # UNPACKING PARQUET AUDIO DATASET
+    # Generate dataset
     # ===========================================
-    DATA_INPUT_PATH   = DATA_DIR / "geronimobasso_drone-audio-detection-samples"
-    DATA_OUTPUT_PATH  = DATA_DIR / "geronimobasso"
+    DATA_INPUT_PATH   = DATA_DIR / "1kHz_test.wav"
+    DATA_OUTPUT_PATH  = DATA_DIR / "teeeest"
     DRONE_FOLDER      = "drone"
     BACKGROUND_FOLDER = "background"
-    LABEL_TO_FOLDER       = {0: BACKGROUND_FOLDER, 1: DRONE_FOLDER} # Match with labels from downloaded dataset
+    LABEL_TO_FOLDER   = {0: BACKGROUND_FOLDER, 1: DRONE_FOLDER} # Match with labels from downloaded dataset
 
     # ===========================================
     # SYSTEM CONFIGURATION

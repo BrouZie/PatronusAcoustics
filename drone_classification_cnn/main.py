@@ -65,6 +65,12 @@ def unpack_parquet(input_folder, output_folder):
     from src.unpack_parquet import unpack_parquet
     return unpack_parquet(input_folder, output_folder)
 
+def generate_dataset(label: str):
+    """Generate dataset from long .wav file"""
+    from src.wav_dataset_generator import generate_dataset
+    return generate_dataset(label)
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -116,6 +122,11 @@ Configuration:
         help="Unpack .parquet files and sort with respect to label",
     )
     parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="Generate dataset from one big .wav file",
+        )
+    parser.add_argument(
         "--model",
         type=str,
         required=False,
@@ -128,6 +139,13 @@ Configuration:
         required=False,
         default=None,
         help="Name of the serial port(Ex. /dev/ttyACM0)",
+        )
+    parser.add_argument(
+        "--label",
+        type=str,
+        required=False,
+        default=None,
+        help="Name of label, drone / background",
         )
     args = parser.parse_args()
 
@@ -164,6 +182,13 @@ Configuration:
     elif args.unpack_parquet:
         print("\n[MODE] Unpack .parquet files")
         unpack_parquet(Config.DATA_INPUT_PATH, Config.DATA_OUTPUT_PATH)
+
+    elif args.generate:
+        if not args.label:
+            parser.error("--label is required when using --generate")
+
+        print("\n[MODE] Generate Dataset")
+        generate_dataset(args.label)
 
     else:
         parser.print_help()
