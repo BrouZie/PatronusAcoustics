@@ -21,7 +21,6 @@
 #include "dma.h"
 #include "mdma.h"
 #include "sai.h"
-#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -53,6 +52,7 @@
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
 /* USER CODE END PFP */
 
@@ -70,6 +70,9 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
+
+  /* MPU Configuration--------------------------------------------------------*/
+  MPU_Config();
 
   /* Enable the CPU Cache */
 
@@ -101,7 +104,6 @@ int main(void)
   MX_MDMA_Init();
   MX_SAI1_Init();
   MX_USART3_UART_Init();
-  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
   app_main();
   /* USER CODE END 2 */
@@ -185,6 +187,19 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+ /* MPU Configuration */
+
+void MPU_Config(void)
+{
+
+  /* Disables the MPU */
+  HAL_MPU_Disable();
+
+  /* Enables the MPU */
+  HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
+
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.

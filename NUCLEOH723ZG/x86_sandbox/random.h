@@ -14,8 +14,8 @@
 #ifndef RNG_H
 #define RNG_H
 
+#include <math.h>
 #include <stdint.h>
-#include "arm_math.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -91,10 +91,6 @@ extern "C"
     {
         return (float)(rng_next(r) >> 40) * 0x1.0p-24f;
     }
-    static inline float32_t arm_rng_f32(rng_t* r)
-    {
-        return (float32_t)(rng_next(r) >> 40) * 0x1.0p-24f;
-    }
 
     static inline double rng_range(rng_t* r, double lo, double hi)
     {
@@ -104,9 +100,21 @@ extern "C"
     {
         return lo + (hi - lo) * rng_float(r);
     }
-    static inline float32_t arm_rng_rangef32(rng_t* r, float32_t lo, float32_t hi)
+
+    /* -------------------------GAUSSIAN------------------------------ */
+
+    /* Standard normal N(0, 1), Box-Muller. Draws two uniforms and returns one of
+     * the two normals produced; the other is discarded so rng_t stays stateless
+     * beyond s[]. 1 - u lies in (0, 1], so log() never sees 0. Max |x| ~ 8.6. */
+    static inline double rng_gauss(rng_t* r)
     {
-        return lo + (hi - lo) * arm_rng_f32(r);
+        const double u1 = 1.0 - rng_double(r);
+        const double u2 = rng_double(r);
+        return sqrt(-2.0 * log(u1)) * cos(6.283185307179586 * u2);
+    }
+    static inline float rng_gaussf(rng_t* r)
+    {
+        return (float)rng_gauss(r);
     }
 
     /* -----------------------INTEGER TYPES---------------------------- */

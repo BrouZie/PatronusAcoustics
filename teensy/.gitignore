@@ -1,7 +1,0 @@
-.pio
-.cache/
-
-compile_commands.json
-.vscode/
-
-uv.lock

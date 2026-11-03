@@ -2,6 +2,7 @@ import struct
 import numpy as np
 import serial
 import time
+from collections import deque
 import torch
 import torch.nn.functional as funct
 from pathlib import Path
@@ -13,9 +14,9 @@ from src.model import get_model
 
 
 MAGIC_BYTES = struct.pack("<I", Config.MAGIC)
-HDR = struct.Struct("<II")             # magic, seq
-HDR_SIZE = HDR.size                    # 8
-PACKET_SIZE = HDR_SIZE + Config.FRAMES * Config.N_MELS
+HDR = struct.Struct("<IIff")             # magic, seq, azimuth, elevation
+HDR_SIZE = HDR.size                      # 16
+PACKET_SIZE = HDR_SIZE + Config.N_MELS   # one packet per frame
 
 def normalize(db, top_db=80.0):
     """
@@ -57,7 +58,8 @@ def load_model(model_path):
 
 def find_packet(buf):
     """
-    (seq, image) of the next complete packet in buf, or None.
+    (seq, column, az, el) of the next complete packet in buf, or None.
+    column is one frame of absolute dB values, N_MELS long.
     MAGIC_BYTES need to match whats given in log_mel application.
     """
     at = buf.find(MAGIC_BYTES)
@@ -67,11 +69,10 @@ def find_packet(buf):
     del buf[:at]                         # drop junk before the magic
     if len(buf) < PACKET_SIZE:
         return None                      # packet not fully received yet
-    _, seq = HDR.unpack_from(buf)
-    cells = np.frombuffer(bytes(buf[HDR_SIZE:PACKET_SIZE]), np.uint8)
+    _, seq, az, el = HDR.unpack_from(buf)
+    cells = np.frombuffer(bytes(buf[HDR_SIZE:PACKET_SIZE]), np.uint8).astype(np.float32)
     del buf[:PACKET_SIZE]
-    image = cells.reshape(Config.FRAMES, Config.N_MELS).astype(np.float32)
-    return seq, image / Config.Q_SCALE + Config.Q_OFFSET
+    return seq, cells / Config.Q_SCALE + Config.Q_OFFSET, az, el
 
 def predict(model, device, image, threshold):
     """
@@ -90,15 +91,25 @@ def predict(model, device, image, threshold):
         "probabilities": {"safe": round(prob_safe, 4), "threat": round(prob_threat, 4)},
         "threshold_used": threshold,
     }
-def print_alert(result, seq):
+def print_alert(result, seq, az, el):
     p = result["probabilities"]
     if result["status"] == "THREAT":
-        print("\n" + "!" * 60)
-        print("!!! [ALERT] DRONE DETECTED !!!")
-        print(f"  Packet: {seq}   Threat confidence: {p['threat']:.1%}")
-        print("!" * 60)
+        print(
+            f"\033[31m[DANGER]\033[0m  "
+            f"packet: {seq:>5}  "
+            f"safe: {p['safe']:>7.1%}  "
+            f"az: {az:>7.2f}  "
+            f"el: {el:>7.2f}"
+            f"{"DRONE DETECTED!":>20}"
+        )
     else:
-        print(f"[CLEAR] packet {seq}  safe: {p['safe']:.1%}")
+        print(
+            f"\033[32m[CLEAR]\033[0m   "
+            f"packet: {seq:>5}  "
+            f"safe: {p['safe']:>7.1%}  "
+            f"az: {az:>7.2f}  "
+            f"el: {el:>7.2f}"
+        )
 
 def detect(model, device, serial_port, baudrate, idle_timeout=None):
     """
@@ -106,20 +117,29 @@ def detect(model, device, serial_port, baudrate, idle_timeout=None):
     """
     buf = bytearray()
     last_seq = None
+    window = deque(maxlen=Config.FRAMES)  # sliding window of the newest columns
+    since_predict = 0
     try:
         with serial.Serial(serial_port, baudrate, timeout=1) as ser:
             print(f"Connected to {serial_port}")
             deadline = time.time() + idle_timeout if idle_timeout else None
             while deadline is None or time.time() < deadline:
                 buf += ser.read(ser.in_waiting or 1)
+
+                # Consume everything received before predicting, so a slow
+                # prediction can't build a backlog: only the newest window is used.
                 while (packet := find_packet(buf)):
-                    seq, image = packet
+                    seq, column, az, el = packet
                     if last_seq is not None and seq != (last_seq + 1) & 0xFFFFFFFF:
                         print(f"Sequence jump: {last_seq} -> {seq}")
                     last_seq = seq
+                    window.append(column)
+                    since_predict += 1
 
-                    result = predict(model, device, image, Config.THREAT_CONFIDENCE_THRESHOLD)
-                    print_alert(result, seq)
+                if len(window) == Config.FRAMES and since_predict >= Config.INFERENCE_STRIDE:
+                    since_predict = 0
+                    result = predict(model, device, np.stack(window), Config.THREAT_CONFIDENCE_THRESHOLD)
+                    print_alert(result, last_seq, az, el)
                     if idle_timeout:
                         deadline = time.time() + idle_timeout
     except serial.SerialException as e:

@@ -1,43 +1,48 @@
 #include "app_entry.h"
-#include "audio_config.h"
+
 #include "console.h"
 #include "ics52000.h"
 
-#include <math.h>
 #include <stdio.h>
+
+global AudioFrameView View;
 
 void app_main(void)
 {
-    float32_t* pcm[AUDIO_SAMPLES_PER_BLOCK];
-    audio_format_t fmt = ics52000_format();
-
     console_init();
-    ics52000_start();
+    ics52000_init();
 
-    while (1)
+    uint32_t last_seq = 0;
+
+    while (true)
     {
-        if (ics52000_read(pcm))
+        // Skip until a new half has landed (also skips seq == 0, before any data)
+        if (!ics52000_read(&View) || View.seq == last_seq)
         {
-            for (uint32_t i = 0; i < fmt.mic_count; ++i)
-            {
-                float32_t sum_sq = 0.0f;
-                float32_t peak   = 0.0f;
-                for (uint32_t j = 0; j < ICS_FRAME_SAMPLES; ++j)
-                {
-                    float32_t s  = pcm[i][j];
-                    sum_sq      += s * s;
-                    float32_t a  = fabsf(s);
-                    if (a > peak)
-                        peak = a;
-                }
-                float rms  = sqrtf(sum_sq / fmt.samples_per_block);
-                float dbfs = 20.0f * log10f(rms + 1e-20f);
-                // printf("%8ld %8ld %6d\t", (long)rms, (long)peak, (int)dbfs);
-                printf("%.1f", dbfs);
-                if (i + 1 < fmt.mic_count)
-                    printf(",");
-            }
-            printf("\r\n");
+            continue;
         }
+        last_seq = View.seq;
+
+        for (uint32_t mic_idx = 0; mic_idx < MIC_COUNT; ++mic_idx)
+        {
+            float32_t sum_sq = 0.0f;
+
+            for (uint32_t sample_idx = 0; sample_idx < AUDIO_SAMPLES; ++sample_idx)
+            {
+                // Interleaved: pcm[sample][mic]
+                float32_t sample  = (float32_t)View.frame->pcm[sample_idx][mic_idx];
+                sum_sq += sample * sample;
+            }
+
+            float32_t rms  = sqrtf(sum_sq / AUDIO_SAMPLES) / SCALING_FACTOR(sample_t);
+            float32_t dbfs = 20.0f * log10f(rms + 1e-20f);
+
+            printf("%.1f", dbfs);
+            if (mic_idx + 1 < MIC_COUNT)
+            {
+                printf(",");
+            }
+        }
+        printf("\r\n");
     }
 }
