@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "dma.h"
-#include "mdma.h"
 #include "sai.h"
 #include "usart.h"
 #include "gpio.h"
@@ -101,7 +100,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_MDMA_Init();
   MX_SAI1_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */

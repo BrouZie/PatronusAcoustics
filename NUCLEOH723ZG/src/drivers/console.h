@@ -1,11 +1,13 @@
 #ifndef CONSOLE_H
 #define CONSOLE_H
 
-#include "arm_math_types.h"
-#include "stdint.h"
+#include "types.h"
 
 void console_init(void);
-void UART_MDMA_send_buffer(const void* dtcm_block, uint32_t size);
-void UART_DMA_start(uint32_t buffer, uint32_t size);
+
+// Used in async mode - avoid mixing use of printf and async
+// transmission, as we only have one USART/dataline
+bool32 console_busy(void);
+bool32 console_send_async(const void *data, size_t len);
 
 #endif

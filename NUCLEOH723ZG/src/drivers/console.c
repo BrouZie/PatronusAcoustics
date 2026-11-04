@@ -1,114 +1,85 @@
 #include "console.h"
-#include "audio_config.h"
-#include "main.h"
-#include "mdma.h"
-#include "mpu.h"
+
+#include "linker.h"
 #include "usart.h"
 
-#include "arm_math_types.h"
-#include <stdint.h>
 #include <stdio.h>
 
-/*
- * Capture path
- * ------------
- * DTCM --> (DTCM, MPU non-cacheable)
- *                      |
- *                      | MDMA, transfers data from DTCM to caller allocated location in RAM 
- *                      v
- *                  _output_buffer (Location chosen by caller, ping-pong)
- *                      |
- *                      | DMA: Double buffer
- *                      v
- *                    USART
- *
- * Caller-provided output buffer; double-buffered to allow one buffer to be transmitted while the other is filled
- * MDMA sends data from DTCM to outputbuffer, DMA sends data from buffer address to USART
- */
+#define CONSOLE_UART huart3
+#define CONSOLE_DMA  hdma_usart3_tx
 
-#define OUTPUT_BUF_SIZE SPECTRUM_FLOATS
+enum
+{
+    // NOTE: Maximum tx buffer-size is set to the size of Full_Packet (API-example)
+    // with pcm[NUM_MICS][AUDIO_SAMPLES] accounted for. You'll never realistically need more.
+    TX_MAX_SIZE = (MIC_COUNT * AUDIO_SAMPLES * 2) + (128 * 4) + 16
+};
 
-#define USART_MDMA_HANDLE hmdma_mdma_channel0_sw_0
-#define USART_DMA_HANDLE hdma_usart3_tx
+global uint8_t         TxBuf[TX_MAX_SIZE] RAM1;
+global char            StdoutBuf[128]     RAM1; // Buffer for printf
+global volatile bool32 TxBusy;
 
-// Output buffer and flags
-static uint32_t _output_buffer[2];
-static uint32_t _output_buffer_size;
-static uint32_t _pending_size   = 0;
+internal void tx_done(DMA_HandleTypeDef *h)
+{
+    (void)h;
+    CONSOLE_UART.Instance->CR3 &= ~USART_CR3_DMAT;
+    TxBusy = false;
+}
 
-static volatile uint8_t _dma_active_idx = 0;
-static volatile uint8_t _dma_busy       = 0;
-static volatile uint8_t _mdma_busy      = 0;
-static uint8_t _pending_fill_idx        = 0;
-
-/* --------- Init  --------- */
+internal void tx_error(DMA_HandleTypeDef *h)
+{
+    (void)h;
+    __builtin_trap();
+}
 
 void console_init(void)
 {
-    setvbuf(stdout, NULL, _IONBF, 0); // Non-Buffered output stream
+    HAL_DMA_RegisterCallback(&CONSOLE_DMA, HAL_DMA_XFER_CPLT_CB_ID, tx_done);
+    HAL_DMA_RegisterCallback(&CONSOLE_DMA, HAL_DMA_XFER_ERROR_CB_ID, tx_error);
+    setvbuf(stdout, StdoutBuf, _IOLBF, sizeof(StdoutBuf));
 }
 
-int __io_putchar(int ch)
+// _write is called by printf and should only be used in
+// main context - i.e. no printfs in any ISR 
+int _write(int file, char *ptr, int len)
 {
-    HAL_UART_Transmit(&huart3, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
-    return ch;
+    (void)file;
+    ASSERT(__get_IPSR() == 0);
+
+    size_t off = 0;
+    while (off < (size_t)len)
+    {
+        size_t n = (size_t)len - off;
+        if (n > sizeof(TxBuf))
+        {
+            n = sizeof(TxBuf);
+        }
+        while (!console_send_async(ptr + off, n))
+        {
+        }
+        off += n;
+    }
+    return len;
 }
 
-/* --------- Callbacks --------- */
-
-void DMA_transfer_complete(DMA_HandleTypeDef* hdma)
+bool32 console_busy(void)
 {
-    (void)hdma; // Silence warning: unused parameter hdma. Parameter needed for HAL_DMA_RegisterCallback
-    huart3.Instance->CR3 &= ~USART_CR3_DMAT;
-    _dma_busy             = 0;
-    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
+    return TxBusy;
 }
 
-void MDMA_transfer_complete(MDMA_HandleTypeDef* hmdma)
+bool32 console_send_async(const void *data, size_t len)
 {
-    (void)hmdma;
-    _mdma_busy = 0;
-
-    // Each send goes out as soon as it's copied
-    uint8_t idx = _pending_fill_idx;
-
-    _dma_active_idx = idx;
-    _dma_busy       = 1;
-    huart3.Instance->CR3 |= USART_CR3_DMAT;
-    HAL_DMA_Start_IT(&USART_DMA_HANDLE, _output_buffer[_dma_active_idx], (uint32_t)&huart3.Instance->TDR,
-                     _pending_size);
-}
-
-/* --------- DMA & MDMA --------- */
-
-void UART_DMA_start(uint32_t output_buffer, uint32_t size)
-{
-	_output_buffer[0] = output_buffer;
-	_output_buffer[1] = output_buffer + size;
-	_output_buffer_size = size;
-	
-    configure_mpu((uint32_t*)output_buffer, size * 2);
-    console_init();
-    HAL_DMA_RegisterCallback(&USART_DMA_HANDLE, HAL_DMA_XFER_CPLT_CB_ID, &DMA_transfer_complete);
-    HAL_MDMA_RegisterCallback(&USART_MDMA_HANDLE, HAL_MDMA_XFER_CPLT_CB_ID, &MDMA_transfer_complete);
-}
-
-void UART_MDMA_send_buffer(const void* dtcm_block, uint32_t size)
-{
-    // Must fit one half of the buffer given to UART_DMA_start()
-    if (size > _output_buffer_size) {
-        __builtin_trap();
+    ASSERT(len <= sizeof(TxBuf));
+    if (TxBusy)
+    {
+        return false;
     }
 
-    // Blocks while the previous send is on the wire
-    while (_mdma_busy || _dma_busy) { }
-    uint8_t fill_idx = 1 - _dma_active_idx;
+    memcpy(TxBuf, data, len);
+    SCB_CleanDCache_by_Addr((void *)TxBuf, (int32_t)((len + 31) & ~31));
 
-    _pending_fill_idx = fill_idx;
-	_pending_size     = size;
-    _mdma_busy        = 1;
-
-
-    uint32_t dest = _output_buffer[fill_idx];
-    HAL_MDMA_Start_IT(&USART_MDMA_HANDLE, (uint32_t)dtcm_block, dest, size, 1);
+    TxBusy = true;
+    CONSOLE_UART.Instance->CR3 |= USART_CR3_DMAT;
+    HAL_DMA_Start_IT(&CONSOLE_DMA, (uint32_t)TxBuf, (uint32_t)&CONSOLE_UART.Instance->TDR, len);
+    return true;
 }

@@ -34,7 +34,7 @@ from pyqtgraph.Qt import QtCore
 # --- Config: serial device and display preferences.
 PORT = "/dev/ttyACM0"
 # PORT = "/tmp/ttySIM0"
-BAUD = 921600
+BAUD = 4194304
 
 SECONDS_SHOWN = 12.0        # width of the scrolling view
 # AUTO_LEVELS = True          # track the signal's own range; False uses LEVELS
@@ -210,7 +210,9 @@ def main():
     global port, plot, img_item, label
 
     try:
-        port = serial.Serial(PORT, BAUD, timeout=0)
+        port = serial.Serial(PORT, 115200, timeout=0)
+        port._set_special_baudrate(BAUD)
+
     except serial.SerialException as e:
         print(f"Could not open {PORT}: {e}")
         print("Check that the board is connected and that PORT/BAUD at the top of this "

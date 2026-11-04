@@ -120,7 +120,11 @@ def detect(model, device, serial_port, baudrate, idle_timeout=None):
     window = deque(maxlen=Config.FRAMES)  # sliding window of the newest columns
     since_predict = 0
     try:
-        with serial.Serial(serial_port, baudrate, timeout=1) as ser:
+        # Open port with baudrate = 115200 first, then set the real rate.
+        # pyserial rejects our desired baudrate (currently 4194304) so we
+        # have to set it to 115200 at first, and then change it.
+        with serial.Serial(serial_port, 115200, timeout=1) as ser:
+            ser._set_special_baudrate(baudrate)
             print(f"Connected to {serial_port}")
             deadline = time.time() + idle_timeout if idle_timeout else None
             while deadline is None or time.time() < deadline:

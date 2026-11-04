@@ -18,7 +18,7 @@ import serial
 from pyqtgraph.Qt import QtCore
 
 PORT = "/dev/ttyACM0"
-BAUD = 921600
+BAUD = 4194304
 
 MAGIC = b"SRPP"
 # magic, seq, az0, az_step, el0, el_step, az_steps, el_steps,
@@ -85,7 +85,8 @@ def main():
     global port, buf, last_seq, dropped, curve, peak_line, label
 
     try:
-        port = serial.Serial(PORT, BAUD, timeout=0.02)
+        port = serial.Serial(PORT, 115200, timeout=0)
+        port._set_special_baudrate(BAUD)
     except serial.SerialException as e:
         print(f"Could not open {PORT}: {e}")
         sys.exit(1)
