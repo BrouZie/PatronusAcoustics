@@ -17,7 +17,7 @@
 APP     ?= usart_echo
 BUILD   ?= Debug
 PORT    ?= /dev/ttyACM0
-BAUD    ?= 921600
+BAUD    ?= 4194304
 JOBS    ?=
 
 BDIR     = build/$(BUILD)

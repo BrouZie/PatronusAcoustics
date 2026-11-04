@@ -27,7 +27,7 @@ RATE = 16000     # AUDIO_SAMPLE_RATE_HZ
 FFT  = 1024      # SPECTRUM_FFT_SIZE
 MICS = 1         # AUDIO_MIC_COUNT
 PORT = "/dev/ttyACM0"
-BAUD = 921600
+BAUD = 4194304
 
 DB_RANGE = (-60.0, 40.0)
 IDLE_TICKS = 100            # 20 ms timer tick -> warn after ~2 s of silence
@@ -98,9 +98,6 @@ def poll():
 
 
 def main():
-    print("="*90)
-    print("NB: baud rate (921600) of current USART setup limits this script to run at maximum 1 mic")
-    print("="*90)
     global mics, bins, fl_ch, fl_frame, frame_bytes, freqs, nyquist, port, buf
     global idle_ticks, nframes, mags, pk_line, label
 
@@ -113,7 +110,8 @@ def main():
     nyquist = RATE / 2
 
     try:
-        port = serial.Serial(PORT, BAUD, timeout=0.2)
+        port = serial.Serial(PORT, 115200, timeout=0)
+        port._set_special_baudrate(BAUD)
     except serial.SerialException as e:
         print(f"Could not open {PORT}: {e}")
         print("Check that board is connected and config globals at the top of this file "

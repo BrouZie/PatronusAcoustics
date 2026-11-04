@@ -25,7 +25,7 @@ class Config:
     # ===========================================
     # DATA Transfer
     # ===========================================
-    BAUDRATE = 921600
+    BAUDRATE = 4194304
     MAGIC    = 0x314C4D4C # "LML1": starts every packet, one packet per frame (must match firmware)
     INFERENCE_STRIDE = 8  # Frames between predictions (8 * 32 ms = 256 ms)
 
