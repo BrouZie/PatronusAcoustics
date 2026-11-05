@@ -7,7 +7,7 @@
 #include "dsp.h"
 
 #define BEAMFORM
-#define SRP_ONLY
+// #define SRP_ONLY
 
 #ifdef SRP_ONLY
 #include <stdio.h>
@@ -61,6 +61,7 @@ global const MicArray MicPositions = { {
 void pack_full(const SRP_PHAT* srp, const Logmel* mel, Full_Packet* packet)
 {
     packet->magic     = 0xDEADBEA7;
+    packet->seq       = View.seq;
 #ifdef X86_DEBUG
     memcpy(packet->pcm, View.frame->pcm, sizeof(View.frame->pcm));
 #endif
