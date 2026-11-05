@@ -60,13 +60,13 @@ class Config:
     # ===========================================
     # TRAINING PARAMETERS
     # ===========================================
-    BATCH_SIZE    = 8 
+    BATCH_SIZE    = 32 
     NUM_EPOCHS    = 50
     LEARNING_RATE = 1e-4
     WEIGHT_DECAY  = 1e-5 # L2 regularization
 
     # Early Stopping Configuration
-    EARLY_STOPPING_PATIENCE  = 30 
+    EARLY_STOPPING_PATIENCE  = 10 
     EARLY_STOPPING_MIN_DELTA = 1e-4
 
     # Data Split Ratios
@@ -89,7 +89,7 @@ class Config:
     # ===========================================
     # Generate dataset
     # ===========================================
-    DATA_INPUT_PATH   =  "/home/kasperngbergan/workstation/eik/PatronusAcoustics/NUCLEOH723ZG/tools/1kHz.npy"
+    DATA_INPUT_PATH   = "/home/kasperngbergan/workstation/eik/PatronusAcoustics/drone_classification_cnn/data/test/float32-no-drone.npy"
     DATA_OUTPUT_PATH  = DATA_DIR / "test"
     DRONE_FOLDER      = "drone"
     BACKGROUND_FOLDER = "background"

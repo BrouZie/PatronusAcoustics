@@ -106,19 +106,8 @@ class DroneDetectorCNN(nn.Module):
         # Initialize weights
         self._initialize_weights()
 
-    # def _initialize_weights(self):
-    #     """Initialize model weights using Kaiming initialization."""
-    #     for m in self.modules():
-    #         if isinstance(m, nn.Conv2d):
-    #             nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-    #         elif isinstance(m, nn.BatchNorm2d):
-    #             nn.init.constant_(m.weight, 1)
-    #             nn.init.constant_(m.bias, 0)
-    #         elif isinstance(m, nn.Linear):
-    #             nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-    #             if m.bias is not None:
-    
     def _initialize_weights(self):
+        """Initialize model weights using Kaiming initialization."""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
@@ -126,14 +115,10 @@ class DroneDetectorCNN(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
-                nn.init.constant_(m.bias, 0)
-
-        # Output layer: small init so initial logits are near 0 (loss ≈ ln 2)
-        last = self.classifier[-1]
-        nn.init.normal_(last.weight, std=0.01)
-        nn.init.constant_(last.bias, 0)   #                 nn.init.constant_(m.bias, 0)
-
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the network.

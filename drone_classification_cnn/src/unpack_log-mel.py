@@ -49,4 +49,4 @@ def generate_dataset(folder_name: str) -> None:
     print(f"Clip shape: ({Config.N_MELS}, {Config.FRAMES})")
     print(f"Duration per clip: {Config.DURATION}s")
 
-generate_dataset("drone")
+generate_dataset("background")
