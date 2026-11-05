@@ -6,6 +6,13 @@
 
 #include "dsp.h"
 
+#define BEAMFORM
+#define SRP_ONLY
+
+#ifdef SRP_ONLY
+#include <stdio.h>
+#endif
+
 #ifdef REPORT_FRAMES
 #include "clock.h"
 #endif
@@ -84,21 +91,29 @@ void app_main(void)
 
         dsp_compute_spectrum(View.frame, &Prev, &Spec);
         dsp_compute_srp(&State, &Spec, &Srp);
+#ifdef SRP_ONLY
+        printf("x: %.2f\ty: %.2f\r\n", Srp.azimuth, Srp.elevation);
+#else
+    #ifdef BEAMFORM
         dsp_beamform_delay_sum(&Spec, &MicPositions, Srp.azimuth, Srp.elevation, BeamSpectrum);
-        dsp_compute_logmel_frame(Spec.scratch, BeamSpectrum, &Mel);
+        const float32_t* mel_input = BeamSpectrum;
+    #else
+        const float32_t* mel_input = Spec.bins[0];
+    #endif
+        dsp_compute_logmel_frame(Spec.scratch, mel_input, &Mel);
 
-#ifndef REPORT_FRAMES
+    #ifndef REPORT_FRAMES
         if (!console_busy())
         {
             pack_full(&Srp, &Mel, &Packet);
             console_send_async(&Packet, sizeof(Packet));
         }
-#endif // !REPORT_FRAMES
+    #endif // !REPORT_FRAMES
 
-#ifdef REPORT_FRAMES
+    #ifdef REPORT_FRAMES
     FRAME_TIMER_LAP();
+    #endif
 #endif
-
         last_seq = View.seq;
     }
 }
