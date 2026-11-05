@@ -42,6 +42,7 @@ class Config:
 
     # Mel-Spectrogram Configuration
     FRAMES     = 61   # Number of frames per spectogram image
+    HOP_FRAMES = 61   # HOP_FRAMES = FRAMES gives no overlap 
     N_FFT      = 1024 # FFT window size
     HOP_LENGTH = 512  # Stride between FFT windows
     N_MELS     = 128  # Number of Mel frequency bins
@@ -59,13 +60,13 @@ class Config:
     # ===========================================
     # TRAINING PARAMETERS
     # ===========================================
-    BATCH_SIZE    = 32
+    BATCH_SIZE    = 8 
     NUM_EPOCHS    = 50
     LEARNING_RATE = 1e-4
     WEIGHT_DECAY  = 1e-5 # L2 regularization
 
     # Early Stopping Configuration
-    EARLY_STOPPING_PATIENCE  = 10
+    EARLY_STOPPING_PATIENCE  = 30 
     EARLY_STOPPING_MIN_DELTA = 1e-4
 
     # Data Split Ratios
@@ -88,8 +89,8 @@ class Config:
     # ===========================================
     # Generate dataset
     # ===========================================
-    DATA_INPUT_PATH   = DATA_DIR / "1kHz_test.wav"
-    DATA_OUTPUT_PATH  = DATA_DIR / "teeeest"
+    DATA_INPUT_PATH   =  "/home/kasperngbergan/workstation/eik/PatronusAcoustics/NUCLEOH723ZG/tools/1kHz.npy"
+    DATA_OUTPUT_PATH  = DATA_DIR / "test"
     DRONE_FOLDER      = "drone"
     BACKGROUND_FOLDER = "background"
     LABEL_TO_FOLDER   = {0: BACKGROUND_FOLDER, 1: DRONE_FOLDER} # Match with labels from downloaded dataset

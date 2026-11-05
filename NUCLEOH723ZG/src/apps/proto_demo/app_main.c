@@ -42,7 +42,7 @@ typedef struct __attribute__((packed)) {
 // MDMA writes doublewords, so every send must be a multiple of 8 bytes
 _Static_assert(sizeof(logmel_packet_t) % 8 == 0, "logmel_packet_t must be a multiple of 8 bytes");
 
-static uint8_t  _active_write_buf  = 0;
+static uint8_t  _active_write_buf = 0;
 
 // Ping-pong, so the MDMA can still be reading one packet while the next is built
 static logmel_packet_t _logmel_packet[2] __attribute__((section(LOGMEL_FRAME_DTCM_BUF), aligned(32)));
