@@ -89,7 +89,7 @@ class Config:
     # ===========================================
     # Generate dataset
     # ===========================================
-    DATA_INPUT_PATH   = "/home/kasperngbergan/workstation/eik/PatronusAcoustics/drone_classification_cnn/data/test/float32-no-drone.npy"
+    DATA_INPUT_PATH   = "/home/kasperngbergan/workstation/eik/PatronusAcoustics/drone_classification_cnn/data/test/"
     DATA_OUTPUT_PATH  = DATA_DIR / "test"
     DRONE_FOLDER      = "drone"
     BACKGROUND_FOLDER = "background"
