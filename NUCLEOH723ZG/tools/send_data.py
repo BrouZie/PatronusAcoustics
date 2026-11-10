@@ -18,7 +18,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("wav")
     p.add_argument("--port", required=True, help="e.g. COM5 or /dev/ttyACM0")
-    p.add_argument("--baud", type=int, default=921600)
+    p.add_argument("--baud", type=int, default=4194304)
     p.add_argument("--hop", type=int, default=512,
                    help="samples per chunk (ICS_HOP_SAMPLES); chunk is hop*4 bytes")
     p.add_argument("--rate", type=int, default=16000,
@@ -41,7 +41,9 @@ def main():
     if needed > args.baud:
         print(f"WARNING: need ~{needed} baud for real-time, link is {args.baud}")
 
-    with serial.Serial(args.port, args.baud, timeout=1) as ser:
+    with serial.Serial(args.port, 115200, timeout=1) as ser:
+        ser._set_special_baudrate(args.baud)
+
         ser.reset_output_buffer()
         t0 = time.perf_counter()
         sent = 0                               # chunks sent in total, across all passes
