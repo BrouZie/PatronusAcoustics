@@ -118,7 +118,7 @@ class DroneDetectorCNN(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the network.

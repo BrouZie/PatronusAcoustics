@@ -23,6 +23,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.data_discovery import DatasetDiscovery
 
+class LogMelNormalize(nn.Module):
+    def __init__(self, db_min=-80.0, db_max=0.0):
+        super().__init__()
+        self.db_min, self.db_max = db_min, db_max
+
+    @torch.no_grad()
+    def forward(self, x):
+        return ((x - self.db_min) / (self.db_max - self.db_min)).clamp(0, 1)
+
 class LogMelSpectrogram(nn.Module):
     """
     Batched waveform -> normalized log-Mel-Spectrogram front end.
@@ -124,109 +133,6 @@ def augment_spectrogram(batch: torch.Tensor) -> torch.Tensor:
 
     return batch
 
-
-class AudioTransform:
-    """
-    Audio preprocessing pipeline for acoustic threat detection.
-
-    Converts raw waveforms to Mel-Spectrograms optimized for
-    detecting drone propeller acoustic signatures.
-    """
-
-    def __init__(
-        self,
-        sample_rate: int = Config.SAMPLE_RATE,
-        duration: float = Config.DURATION,
-        n_mels: int = Config.N_MELS,
-        n_fft: int = Config.N_FFT,
-        hop_length: int = Config.HOP_LENGTH,
-        f_min: float = Config.F_MIN,
-        f_max: float = Config.F_MAX,
-    ):
-        self.sample_rate = sample_rate
-        self.duration = duration
-        self.n_samples = int(sample_rate * duration)
-        self.n_mels = n_mels
-        self.n_fft = n_fft
-        self.hop_length = hop_length
-        self.f_min = f_min
-        self.f_max = f_max
-        self.frontend = LogMelSpectrogram(
-            sample_rate=sample_rate,
-            n_mels=n_mels,
-            n_fft=n_fft,
-            hop_length=hop_length,
-            f_min=f_min,
-            f_max=f_max,
-        )
-
-    def load_audio(self, file_path: Path) -> np.ndarray:
-        """
-        Load and preprocess audio file.
-
-        Args:
-            file_path: Path to .wav file
-
-        Returns:
-            Normalized audio array of fixed length
-        """
-        try:
-            # Load audio with target sample rate
-            waveform, sr = librosa.load(
-                file_path,
-                sr=self.sample_rate,
-                mono=True,
-                duration=self.duration
-            )
-
-            # Pad or truncate to exact length
-            if len(waveform) < self.n_samples:
-                # Pad with zeros
-                padding = self.n_samples - len(waveform)
-                waveform = np.pad(waveform, (0, padding), mode="constant")
-            elif len(waveform) > self.n_samples:
-                # Truncate
-                waveform = waveform[:self.n_samples]
-
-            return waveform
-
-        except Exception as e:
-            print(f"[ERROR] Failed to load {file_path}: {e}")
-            # Return silence on error
-            return np.zeros(self.n_samples, dtype=np.float32)
-
-    def to_mel_spectrogram(self, waveform: np.ndarray) -> np.ndarray:
-        """
-        Convert waveform to Mel-Spectrogram.
-
-        The Mel scale emphasizes frequencies perceptually important to humans
-        and captures the characteristic frequency patterns of drone motors.
-
-        Args:
-            waveform: Audio time series
-
-        Returns:
-            Log-scaled Mel-Spectrogram as 2D array
-        """
-        batch = torch.from_numpy(waveform).unsqueeze(0)
-        return self.frontend(batch)[0, 0].numpy()
-
-    def __call__(self, file_path: Path) -> torch.Tensor:
-        """
-        Complete transform pipeline: Audio file -> Tensor.
-
-        Args:
-            file_path: Path to audio file
-
-        Returns:
-            Mel-Spectrogram tensor of shape (1, n_mels, time_frames)
-        """
-        waveform = self.load_audio(file_path)
-        batch = torch.from_numpy(waveform).unsqueeze(0)
-
-        return self.frontend(batch).squeeze(0)
-
-
 class DroneAudioDataset(Dataset):
     """
     PyTorch Dataset for drone acoustic detection.
@@ -239,7 +145,6 @@ class DroneAudioDataset(Dataset):
         self,
         drone_files: List[Path],
         background_files: List[Path],
-        transform: Optional[AudioTransform] = None,
     ):
         """
         Initialize the dataset.
@@ -249,8 +154,6 @@ class DroneAudioDataset(Dataset):
             background_files: List of paths to background audio files
             transform: Audio transform pipeline (default: AudioTransform)
         """
-        self.transform = transform or AudioTransform()
-
         # Combine files with labels
         # Label 0 = Safe (Background), Label 1 = Threat (Drone)
         self.samples = []
@@ -280,9 +183,9 @@ class DroneAudioDataset(Dataset):
         """
         file_path, label = self.samples[idx]
 
-        waveform = self.transform.load_audio(file_path)
+        spectrogram = np.load(file_path)
 
-        return torch.from_numpy(waveform), label
+        return torch.from_numpy(spectrogram).float().unsqueeze(0), label
 
     def get_class_weights(self) -> torch.Tensor:
         """
@@ -327,11 +230,6 @@ def get_data_loaders(
 
     if len(drone_files) == 0 or len(background_files) == 0:
         raise ValueError("Dataset is empty or not properly downloaded!")
-
-    # Shuffle files
-    np.random.seed(Config.RANDOM_SEED)
-    np.random.shuffle(drone_files)
-    np.random.shuffle(background_files)
 
     # Split each class proportionally
     def split_files(files: List[Path]) -> Tuple[List, List, List]:

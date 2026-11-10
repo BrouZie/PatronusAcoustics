@@ -25,7 +25,7 @@ def unpack_parquet(input_folder, output_folder):
         input_folder: Location of all the .parquet file
         output_folder: Location of output sorted files
 
-    Make sure Config.LABEL_TO_FOLDER fit with the unpacked dataset 
+    Make sure Config.LABEL_TO_FOLDER fit with the unpacked dataset
     """
 
     print("input:", Path(input_folder).resolve(), "exists:", Path(input_folder).exists())

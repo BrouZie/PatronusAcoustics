@@ -78,14 +78,14 @@ class DatasetDiscovery:
 
             # Show files (limit to prevent overflow)
             sub_indent = "│   " * (depth + 1)
-            wav_files = [f for f in files if f.endswith(".wav")]
-            other_files = [f for f in files if not f.endswith(".wav")]
+            npy_files = [f for f in files if f.endswith(".npy")]
+            other_files = [f for f in files if not f.endswith(".npy")]
 
             for f in other_files[:5]:
                 print(f"{sub_indent}├── {f}")
 
-            if wav_files:
-                print(f"{sub_indent}├── [{len(wav_files)} .wav files]")
+            if npy_files:
+                print(f"{sub_indent}├── [{len(npy_files)} .npy files]")
 
         print("=" * 60 + "\n")
 
@@ -109,8 +109,8 @@ class DatasetDiscovery:
             root_path = Path(root)
             name = root_path.name.lower()
 
-            # Check if this directory contains wav files
-            if not any(f.lower().endswith(".wav") for f in files):
+            # Check if this directory contains npy files
+            if not any(f.lower().endswith(".npy") for f in files):
                 continue
 
             if drone_path is None and self.drone_keyword in name:
@@ -144,10 +144,10 @@ class DatasetDiscovery:
         background_files = []
 
         if drone_path and drone_path.exists():
-            drone_files = list(drone_path.glob("*.wav")) + list(drone_path.glob("*.WAV"))
+            drone_files = list(drone_path.glob("*.npy")) + list(drone_path.glob("*.NPY"))
 
         if background_path and background_path.exists():
-            background_files = list(background_path.glob("*.wav")) + list(background_path.glob("*.WAV"))
+            background_files = list(background_path.glob("*.npy")) + list(background_path.glob("*.NPY"))
 
         print(f"\n[DATA SUMMARY]")
         print(f"  Drone samples:      {len(drone_files)}")
@@ -183,13 +183,13 @@ class DatasetDiscovery:
             # Verify files are readable
             with open(sample_drone, "rb") as f:
                 header = f.read(4)
-                if header != b"RIFF":
-                    print(f"[WARNING] {sample_drone} may not be a valid WAV file")
+                if header != b"\x93NUMPY":
+                    print(f"[WARNING] {sample_drone} may not be a valid npy file")
 
             with open(sample_background, "rb") as f:
                 header = f.read(4)
-                if header != b"RIFF":
-                    print(f"[WARNING] {sample_background} may not be a valid WAV file")
+                if header != b"\x93NUMPY":
+                    print(f"[WARNING] {sample_background} may not be a valid npy file")
 
             print("[SUCCESS] Dataset validation passed!")
             return True

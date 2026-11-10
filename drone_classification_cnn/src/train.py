@@ -36,7 +36,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs.config import Config
 from src.model import get_model
-from src.data_loader import get_data_loaders, LogMelSpectrogram, augment_spectrogram
+from src.data_loader import get_data_loaders, LogMelNormalize, augment_spectrogram
 
 
 class EarlyStopping:
@@ -118,7 +118,8 @@ class Trainer:
         self.test_loader = test_loader
 
         # Waveform -> Mel-Spectrogram conversion on the training device
-        self.frontend = LogMelSpectrogram().to(self.device)
+        # self.frontend = LogMelSpectrogram().to(self.device)
+        self.frontend = LogMelNormalize().to(self.device)
 
         # Loss function with class weights for imbalanced data
         if class_weights is not None:
@@ -427,7 +428,7 @@ class Trainer:
         )
 
         plt.tight_layout()
-        save_path = Config.PLOTS_DIR / f"{model_name}confusion_matrix.png"
+        save_path = Config.PLOTS_DIR / f"{model_name}_confusion_matrix.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close()
 
