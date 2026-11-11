@@ -25,6 +25,32 @@ _Static_assert(2 * sizeof(AudioFrame) <= 16384, "Audio buffer exceeds its DMA_BU
 global AudioFrame PPAudioFrame[2] DMA_BUF; // Ping-pong audio frame
 global volatile uint32_t Sequence;
 
+static void _ws_pin_as_gpio(void)
+{
+    GPIO_InitTypeDef g = { 0 };
+
+    g.Pin   = GPIO_PIN_6;
+    g.Mode  = GPIO_MODE_OUTPUT_PP;
+    g.Pull  = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+
+    HAL_GPIO_Init(GPIOE, &g);
+
+}
+
+static void _ws_pin_as_sai(void)
+{
+    GPIO_InitTypeDef g = { 0 };
+
+    g.Pin       = GPIO_PIN_6;
+    g.Mode      = GPIO_MODE_AF_PP;
+    g.Pull      = GPIO_NOPULL;
+    g.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+	g.Alternate = GPIO_AF6_SAI1;
+
+    HAL_GPIO_Init(GPIOE, &g);
+}
+
 bool32 ics52000_init(void)
 {
     configure_mpu((uint32_t*)PPAudioFrame, sizeof(PPAudioFrame));
@@ -41,12 +67,18 @@ bool32 ics52000_init(void)
         Error_Handler();
     }
 
+	_ws_pin_as_gpio(); // PE4 driven low
+				   
     // DMA startup
     if (HAL_SAI_Receive_DMA(&ICS_SAI_HANDLE_1, (uint8_t*)PPAudioFrame,
                             sizeof(PPAudioFrame) / sizeof(sample_t)) != HAL_OK)
     {
         Error_Handler();
     }
+
+	HAL_Delay(20);    // WS pin should be delayed from the start of SCK by atleast 10 ms
+	_ws_pin_as_sai(); // PE4 configured
+	HAL_Delay(300);   // Atleast 256 ms from startup time to valid data
 
     return true;
 }
