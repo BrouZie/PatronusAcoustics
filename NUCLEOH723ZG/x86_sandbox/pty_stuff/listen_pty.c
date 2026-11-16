@@ -1,95 +1,204 @@
+#include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 #include <termios.h>
+#include <poll.h>
 #include <pty.h>
 
-// TODO: Make packet structs shareable across stm and x86
-// TODO: Refactor stuff into x86 code and utils.h
+/* TODO(sok): Before full merge:
+    1. Move packet def to global header
+    2. Decide interface for working with serial ports. Things to consider:
+        - Ownership
+        - Error-handling & printouts
+        - Struct defs
+    3. Move full implementation to utils.h
+    4. Ideally, rework logmel_viewer, spectrum_viewer ++ (to use same global packet header)
+*/
+
+// Replaced by types.h probably
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef float float32_t;
+typedef bool bool32;
 
-typedef struct {
-    uint32_t magic;       // LOGMEL_MAGIC
-    uint32_t seq;         // increments every frame; used to detect drops
-    float32_t azimuth;
-    float32_t elevation;
-} logmel_header_t;
-
-typedef struct {
-    logmel_header_t header;
-    uint8_t         cells[128];
-} logmel_packet_t;
-
-#define PACKET_SIZE sizeof(logmel_packet_t)
-#define RX_SIZE (PACKET_SIZE * 4)
 #define MAGIC 0x314C4D4C
+#define NUM_MEL_BANDS 128
 
 typedef struct
 {
-    uint8_t buf[RX_SIZE];
-    size_t  len;
-} rx_t;
+    uint32_t  magic;
+    uint32_t  seq;
+    float32_t azimuth;
+    float32_t elevation;
 
-static rx_t Rx;
-static logmel_packet_t Packet;
+} PacketHeader;
 
-// TODO: Make sure we handle errors we care about
-int read_pty_packet(int fd, rx_t* rx, logmel_packet_t* packet)
+typedef struct
 {
-    ssize_t bytes_read = read(fd, rx->buf + rx->len, sizeof(rx->buf) - rx->len);
-    if (bytes_read == 0) return -1;
-    if (bytes_read < 0)
+    PacketHeader header;
+    uint8_t      cells[NUM_MEL_BANDS];
+} QuantizedPacket;
+
+typedef struct
+{
+    int     fd;
+    char    name[64];
+    uint8_t buf[sizeof(QuantizedPacket) * 4];
+    size_t  len;
+    struct termios tio;
+} SerialPortRx;
+
+typedef struct
+{
+    int     master;
+    int     slave;
+    char    name[64];
+    struct termios tio;
+} SerialPortTx;
+
+static SerialPortRx Rx;
+static SerialPortTx Tx;
+
+void open_serial_port_rx(const char* port)
+{
+    Rx.fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+
+    tcgetattr(Rx.fd, &Rx.tio);
+    cfmakeraw(&Rx.tio);
+    tcsetattr(Rx.fd, TCSANOW, &Rx.tio);
+
+    if (Rx.fd < 0)
     {
-        perror("read");
-        return -1;
-    }
-    rx->len += bytes_read;
-
-    int offset = 0;
-    while (rx->len - offset >= sizeof(uint32_t))
-    {
-        uint32_t four_byte_value = ((uint32_t)rx->buf[offset + 3] << 24) |
-                                   ((uint32_t)rx->buf[offset + 2] << 16) |
-                                   ((uint32_t)rx->buf[offset + 1] <<  8) |
-                                    (uint32_t)rx->buf[offset + 0];
-        if (four_byte_value == MAGIC)
-        {
-            if (rx->len - offset < PACKET_SIZE)
-            {
-                break; // wait for more
-            }
-            // consume and update offset
-            memcpy(packet, &rx->buf[offset], PACKET_SIZE);
-            offset += PACKET_SIZE;
-        }
-        else
-        {
-            // update by one byte
-            ++offset;
-        }
+        perror("fd");
+        exit(EXIT_FAILURE);
     }
 
-    memmove(rx->buf, rx->buf + offset, rx->len - offset);
-    printf("Raw.len: %zu, read: %zu, offset: %d\n", rx->len, bytes_read, offset);
-    rx->len -= offset;
-
-    return 1;
+    memcpy(Rx.name, port, strlen(port) + 1);
+    printf("opened port: %s\n", port);
 }
 
-int main()
+bool32 read_serial_port(QuantizedPacket* packet)
 {
-    int fd = open("/tmp/ttySIM0", O_RDONLY | O_NOCTTY);
+    bool32 packet_found = false;
 
-    while (1)
+    while (true)
     {
-        // TODO: Rx hidden or caller owned? Figure out startup (before reader is up to par with the writer)
-        // Check whether the /dev/ttyACM0 behaves identically to /tmp/ttySIM0 (or naht)
-        if (!read_pty_packet(fd, &Rx, &Packet)) break;
-        printf("Packet.seq: %d\n", Packet.header.seq);
+        ssize_t bytes_read = read(Rx.fd, Rx.buf + Rx.len, sizeof(Rx.buf) - Rx.len);
+
+        if (bytes_read > 0)
+        {
+            Rx.len += bytes_read;
+
+            uint32_t offset = 0;
+
+            while (Rx.len - offset >= sizeof(uint32_t))
+            {
+                uint32_t magic_candidate = ((uint32_t)Rx.buf[offset + 3] << 24) |
+                                           ((uint32_t)Rx.buf[offset + 2] << 16) |
+                                           ((uint32_t)Rx.buf[offset + 1] <<  8) |
+                                            (uint32_t)Rx.buf[offset + 0];
+                if (magic_candidate == MAGIC)
+                {
+                    if (Rx.len - offset < sizeof(QuantizedPacket))
+                    {
+                        break; // wait for more
+                    }
+                    // consume and update offset
+                    memcpy(packet, &Rx.buf[offset], sizeof(QuantizedPacket));
+                    offset += sizeof(QuantizedPacket);
+                    packet_found = true;
+                }
+                else
+                {
+                    // update offset by one byte position
+                    ++offset;
+                }
+            }
+            memmove(Rx.buf, Rx.buf + offset, Rx.len - offset);
+            Rx.len -= offset;
+            continue;
+        }
+        if (bytes_read == 0)
+        {
+            // The port got closed
+            return false;
+        }
+
+        /// We've cought up to the datastream: read_bytes == -1 ///
+
+        if (errno == EINTR) continue;
+
+        // Kernel buffer is empty and packet found
+        if (packet_found)
+        {
+            // Newest packet is ready and we return to caller+
+            return true;
+        }
+
+        // no packet, and no data available yet -> poll for more data
+        struct pollfd pfd = { .fd = Rx.fd, .events = POLLIN };
+        if (poll(&pfd, 1, -1) == -1 && errno != EINTR)
+        {
+            perror("poll");
+            return -1;
+        }
     }
+}
+
+void open_serial_port_tx(const char* port)
+{
+    if (openpty(&Tx.master, &Tx.slave, Tx.name, NULL, NULL) < 0)
+    {
+        perror("openpty failed");
+    }
+
+    tcgetattr(Tx.slave, &Tx.tio);
+    cfmakeraw(&Tx.tio);
+    tcsetattr(Tx.slave, TCSANOW, &Tx.tio);
+
+    // Non-blocking: if nobody is reading, drop data like a real UART would
+    fcntl(Tx.master, F_SETFL, fcntl(Tx.master, F_GETFL) | O_NONBLOCK);
+
+    // Symlinking to more meaningful dev name
+    unlink(port);
+    if (symlink(Tx.name, port) < 0)
+    {
+        perror("symlink");
+    }
+
+    printf("Simulated UART over %s (%s)\n", port, Tx.name);
+}
+
+void write_serial_port(const QuantizedPacket* packet)
+{
+    // Not handling perror - so as to not flood stdout
+    // whenever nothing is connected
+    int n = write(Tx.master, packet, sizeof(*packet));
+    if (n < 0 && errno == EAGAIN)
+    {
+        tcflush(Tx.slave, TCIFLUSH);   // nobody's reading: discard backlog
+        n = write(Tx.master, packet, sizeof(*packet));
+    }
+}
+
+int main(void)
+{
+    QuantizedPacket packet;
+
+    open_serial_port_rx("/dev/ttyACM0");
+    open_serial_port_tx("/tmp/ttySIM0");
+
+    while (true)
+    {
+        if (!read_serial_port(&packet)) break;
+        write_serial_port(&packet);
+    }
+
+    printf("goodbye, thanks for playing\n");
 
     return 0;
 }
