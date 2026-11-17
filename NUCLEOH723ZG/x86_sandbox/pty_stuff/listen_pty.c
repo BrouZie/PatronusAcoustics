@@ -6,6 +6,8 @@
 #include <pty.h>
 
 /* TODO(sok): Before full merge:
+    0. Replace pty.h and termios with sys/ioctl.h and asm/termbits.h - i.e. use ioctl() to do all the shit + termios2 struct
+        - You'll need to use swap out tcflush, cfmakeraw, termios, openpty and all of that with posix_openpty(), ioctl() basically
     1. Move packet def to global header
     2. Decide interface for working with serial ports. Things to consider:
         - Ownership
@@ -67,17 +69,22 @@ void open_serial_port_rx(const char* port)
 {
     Rx.fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
 
-    tcgetattr(Rx.fd, &Rx.tio);
-    cfmakeraw(&Rx.tio);
-    tcsetattr(Rx.fd, TCSANOW, &Rx.tio);
-
     if (Rx.fd < 0)
     {
         perror("fd");
         exit(EXIT_FAILURE);
     }
 
-    memcpy(Rx.name, port, strlen(port) + 1);
+    tcgetattr(Rx.fd, &Rx.tio);
+    cfmakeraw(&Rx.tio);
+    // cfsetispeed(&Rx.tio, B1152000);
+    // cfsetospeed(&Rx.tio, B1152000);
+    // Rx.tio.c_cflag |= CLOCAL | CREAD;
+    tcsetattr(Rx.fd, TCSANOW, &Rx.tio);
+
+    tcflush(Rx.fd, TCIFLUSH); // drop any buffered input
+
+    snprintf(Rx.name, sizeof(Rx.name), "%s", port);
     printf("opened port: %s\n", port);
 }
 
@@ -184,6 +191,34 @@ void write_serial_port(const QuantizedPacket* packet)
         n = write(Tx.master, packet, sizeof(*packet));
     }
 }
+
+typedef enum
+{
+    RX, TX,
+} PortType;
+
+typedef struct
+{
+    char     name[64];
+    PortType type;
+} SerialPort;
+
+/*
+ * int main()
+ * {
+ *
+ *     caller holds onto the file handle? -> yes: [ ] no: [x]
+ *     caller provides port name only?    -> yes: [ ] no: [x] -> we wanna provide baud rate
+ *     separate initialization for rx/tx? -> yes: [x] no: [ ]
+ *
+ *     caller owns whatever is not platform specific -> yes: [x] no: [ ]
+ *
+ *     SerialPort port = {0};
+ *     open_serial_port_rx(&port, "/dev/ttyACM0", 4194304)
+ *
+ *     return 0;
+ * }
+ */
 
 int main(void)
 {
