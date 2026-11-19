@@ -32,8 +32,8 @@ import serial
 from pyqtgraph.Qt import QtCore
 
 # --- Config: serial device and display preferences.
-PORT = "/dev/ttyACM0"
-# PORT = "/tmp/ttySIM0"
+# PORT = "/dev/ttyACM0"
+PORT = "/tmp/ttySIM0"
 BAUD = 4194304
 
 SECONDS_SHOWN = 12.0        # width of the scrolling view

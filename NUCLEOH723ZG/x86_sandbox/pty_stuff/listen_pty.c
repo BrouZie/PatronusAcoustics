@@ -1,13 +1,12 @@
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <termios.h>
 #include <poll.h>
-#include <pty.h>
+#include <asm/termbits.h>
+#include <sys/ioctl.h>
 
 /* TODO(sok): Before full merge:
-    0. Replace pty.h and termios with sys/ioctl.h and asm/termbits.h - i.e. use ioctl() to do all the shit + termios2 struct
-        - You'll need to use swap out tcflush, cfmakeraw, termios, openpty and all of that with posix_openpty(), ioctl() basically
     1. Move packet def to global header
     2. Decide interface for working with serial ports. Things to consider:
         - Ownership
@@ -36,7 +35,6 @@ typedef struct
     uint32_t  seq;
     float32_t azimuth;
     float32_t elevation;
-
 } PacketHeader;
 
 typedef struct
@@ -51,40 +49,56 @@ typedef struct
     char    name[64];
     uint8_t buf[sizeof(QuantizedPacket) * 4];
     size_t  len;
-    struct termios tio;
-} SerialPortRx;
+} PacketReader;
 
 typedef struct
 {
-    int     master;
-    int     slave;
-    char    name[64];
-    struct termios tio;
-} SerialPortTx;
+    int   master_fd;
+    int   slave_fd;
+    char* slave_name;
+} PtyPair;
 
-static SerialPortRx Rx;
-static SerialPortTx Tx;
+static PacketReader Reader;
+static PtyPair Pty;
 
-void open_serial_port_rx(const char* port)
+int set_baud(int fd, int baud)
 {
-    Rx.fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+    struct termios2 t;
+    ioctl(fd, TCGETS2, &t);
 
-    if (Rx.fd < 0)
+    // Stolen from https://github.com/lattera/glibc/blob/master/termios/cfmakeraw.c!
+    t.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+    t.c_oflag &= ~OPOST;
+    t.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    t.c_cflag &= ~(CSIZE | PARENB);
+    t.c_cflag |= CS8;
+    t.c_cc[VMIN] = 1;   /* read returns when one char is available. */
+    t.c_cc[VTIME] = 0;
+
+    if (baud > 0)
+    {
+        t.c_cflag &= ~(CBAUD | (CBAUD << IBSHIFT)); // clear input/output fields
+        t.c_cflag |= BOTHER | (BOTHER << IBSHIFT);  // make kernel use c_ispeed and c_ospeed
+        t.c_ispeed = baud;
+        t.c_ospeed = baud;
+    }
+
+    return ioctl(fd, TCSETS2, &t);
+}
+
+void open_serial_port_rx(const char* port, int baud)
+{
+    Reader.fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+    if (Reader.fd < 0)
     {
         perror("fd");
         exit(EXIT_FAILURE);
     }
 
-    tcgetattr(Rx.fd, &Rx.tio);
-    cfmakeraw(&Rx.tio);
-    // cfsetispeed(&Rx.tio, B1152000);
-    // cfsetospeed(&Rx.tio, B1152000);
-    // Rx.tio.c_cflag |= CLOCAL | CREAD;
-    tcsetattr(Rx.fd, TCSANOW, &Rx.tio);
+    set_baud(Reader.fd, baud);
+    ioctl(Reader.fd, TCFLSH, TCIFLUSH);
 
-    tcflush(Rx.fd, TCIFLUSH); // drop any buffered input
-
-    snprintf(Rx.name, sizeof(Rx.name), "%s", port);
+    snprintf(Reader.name, sizeof(Reader.name), "%s", port);
     printf("opened port: %s\n", port);
 }
 
@@ -94,28 +108,28 @@ bool32 read_serial_port(QuantizedPacket* packet)
 
     while (true)
     {
-        ssize_t bytes_read = read(Rx.fd, Rx.buf + Rx.len, sizeof(Rx.buf) - Rx.len);
+        ssize_t bytes_read = read(Reader.fd, Reader.buf + Reader.len, sizeof(Reader.buf) - Reader.len);
 
         if (bytes_read > 0)
         {
-            Rx.len += bytes_read;
+            Reader.len += bytes_read;
 
             uint32_t offset = 0;
 
-            while (Rx.len - offset >= sizeof(uint32_t))
+            while (Reader.len - offset >= sizeof(uint32_t))
             {
-                uint32_t magic_candidate = ((uint32_t)Rx.buf[offset + 3] << 24) |
-                                           ((uint32_t)Rx.buf[offset + 2] << 16) |
-                                           ((uint32_t)Rx.buf[offset + 1] <<  8) |
-                                            (uint32_t)Rx.buf[offset + 0];
+                uint32_t magic_candidate = ((uint32_t)Reader.buf[offset + 3] << 24) |
+                                           ((uint32_t)Reader.buf[offset + 2] << 16) |
+                                           ((uint32_t)Reader.buf[offset + 1] <<  8) |
+                                            (uint32_t)Reader.buf[offset + 0];
                 if (magic_candidate == MAGIC)
                 {
-                    if (Rx.len - offset < sizeof(QuantizedPacket))
+                    if (Reader.len - offset < sizeof(QuantizedPacket))
                     {
                         break; // wait for more
                     }
                     // consume and update offset
-                    memcpy(packet, &Rx.buf[offset], sizeof(QuantizedPacket));
+                    memcpy(packet, &Reader.buf[offset], sizeof(QuantizedPacket));
                     offset += sizeof(QuantizedPacket);
                     packet_found = true;
                 }
@@ -125,8 +139,8 @@ bool32 read_serial_port(QuantizedPacket* packet)
                     ++offset;
                 }
             }
-            memmove(Rx.buf, Rx.buf + offset, Rx.len - offset);
-            Rx.len -= offset;
+            memmove(Reader.buf, Reader.buf + offset, Reader.len - offset);
+            Reader.len -= offset;
             continue;
         }
         if (bytes_read == 0)
@@ -147,7 +161,7 @@ bool32 read_serial_port(QuantizedPacket* packet)
         }
 
         // no packet, and no data available yet -> poll for more data
-        struct pollfd pfd = { .fd = Rx.fd, .events = POLLIN };
+        struct pollfd pfd = { .fd = Reader.fd, .events = POLLIN };
         if (poll(&pfd, 1, -1) == -1 && errno != EINTR)
         {
             perror("poll");
@@ -156,65 +170,71 @@ bool32 read_serial_port(QuantizedPacket* packet)
     }
 }
 
-void open_serial_port_tx(const char* port)
+void open_serial_port_tx(const char* port, int baud)
 {
-    if (openpty(&Tx.master, &Tx.slave, Tx.name, NULL, NULL) < 0)
+    Pty.master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+    if (Pty.master_fd < 0 || grantpt(Pty.master_fd) < 0 || unlockpt(Pty.master_fd) < 0 || (Pty.slave_name = ptsname(Pty.master_fd)) == NULL)
     {
-        perror("openpty failed");
+        perror("posix_openpt");
+        exit(EXIT_FAILURE);
     }
 
-    tcgetattr(Tx.slave, &Tx.tio);
-    cfmakeraw(&Tx.tio);
-    tcsetattr(Tx.slave, TCSANOW, &Tx.tio);
+    Pty.slave_fd = open(Pty.slave_name, O_RDWR | O_NOCTTY);
+    if (Pty.slave_fd < 0 || set_baud(Pty.slave_fd, baud))
+    {
+        perror("slave_fd configuration");
+        exit(EXIT_FAILURE);
+    }
 
-    // Non-blocking: if nobody is reading, drop data like a real UART would
-    fcntl(Tx.master, F_SETFL, fcntl(Tx.master, F_GETFL) | O_NONBLOCK);
+    // set to non-blocking
+    fcntl(Pty.master_fd, F_SETFL, fcntl(Pty.master_fd, F_GETFL) | O_NONBLOCK);
 
-    // Symlinking to more meaningful dev name
+    // Symlinking to deterministic name (pts are generated undeterministically from ptmx)
     unlink(port);
-    if (symlink(Tx.name, port) < 0)
+    if (symlink(Pty.slave_name, port) < 0)
     {
         perror("symlink");
     }
 
-    printf("Simulated UART over %s (%s)\n", port, Tx.name);
+    printf("Simulated UART over %s (%s)\n", port, Pty.slave_name);
 }
 
-void write_serial_port(const QuantizedPacket* packet)
+void write_serial_port(void* data, size_t len)
 {
-    // Not handling perror - so as to not flood stdout
-    // whenever nothing is connected
-    int n = write(Tx.master, packet, sizeof(*packet));
+    int n = write(Pty.master_fd, data, len);
     if (n < 0 && errno == EAGAIN)
     {
-        tcflush(Tx.slave, TCIFLUSH);   // nobody's reading: discard backlog
-        n = write(Tx.master, packet, sizeof(*packet));
+        ioctl(Pty.slave_fd, TCFLSH, TCIFLUSH); // discard backlog, nobody reading from slave
+        n = write(Pty.master_fd, data, len);
     }
 }
 
-typedef enum
+void close_ports(void)
 {
-    RX, TX,
-} PortType;
-
-typedef struct
-{
-    char     name[64];
-    PortType type;
-} SerialPort;
+    close(Reader.fd);
+    close(Pty.master_fd);
+    close(Pty.slave_fd);
+}
 
 /*
  * int main()
  * {
  *
- *     caller holds onto the file handle? -> yes: [ ] no: [x]
- *     caller provides port name only?    -> yes: [ ] no: [x] -> we wanna provide baud rate
- *     separate initialization for rx/tx? -> yes: [x] no: [ ]
+ *     caller holds onto the file handle?  -> yes: [ ] no: [x]
+ *     caller provides port name only?     -> yes: [ ] no: [x] -> we wanna provide baud rate 0 or something different
+ *     separate initialization for rx/tx?  -> yes: [x] no: [ ]
+ *     surface some error value to caller? -> yes: [x] no: [ ]
+ *          - open_serial_port_rx() ->  yes: [x] no: [ ]
+ *          - open_serial_port_tx() ->  yes: [x] no: [ ]
+ *          - write_serial_port()   ->  yes: [x] no: [ ]
+ *          - read_serial_port()    ->  yes: [x] no: [ ]
  *
- *     caller owns whatever is not platform specific -> yes: [x] no: [ ]
- *
- *     SerialPort port = {0};
- *     open_serial_port_rx(&port, "/dev/ttyACM0", 4194304)
+ *     if (!open_serial_port_rx(&port, "/dev/ttyACM0", 4194304))
+ *     {
+ *         try again?
+ *         exit(EXIT_FAILURE)?
+ *         whatever?
+ *     }
  *
  *     return 0;
  * }
@@ -224,16 +244,19 @@ int main(void)
 {
     QuantizedPacket packet;
 
-    open_serial_port_rx("/dev/ttyACM0");
-    open_serial_port_tx("/tmp/ttySIM0");
+    // NOTE: I SHOUDLN'T MANGLE THESE TWO, IT IS DISHONEST BECAUSE THEY ARE
+    // QUITE DIFFERENT REALLY! GIVE THEM PROPER NAMES! STOP WITH SUCKY ABSTRACTIONS!
+    open_serial_port_rx("/dev/ttyACM0", 4194304); // specific packet reader thing
+    open_serial_port_tx("/tmp/ttySIM0", 0);       // more of a pty-pair thingy
 
     while (true)
     {
         if (!read_serial_port(&packet)) break;
-        write_serial_port(&packet);
+        write_serial_port(&packet, sizeof(packet));
     }
 
     printf("goodbye, thanks for playing\n");
+    close_ports();
 
     return 0;
 }
