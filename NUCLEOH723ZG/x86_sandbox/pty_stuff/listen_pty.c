@@ -6,6 +6,11 @@
 #include <asm/termbits.h>
 #include <sys/ioctl.h>
 
+
+// FIX: WERID BUG WITH SIGNAL HANDLER, BAUD RATE (0 VS. 4194304)
+// AND WRITERS RETURN VALUE OR SOMETHING (bool vs. int)
+// - CHECK DEBUGGER BITCH!
+
 /* TODO(sok): Before full merge:
     1. Move packet def to global header
     2. Decide interface for working with serial ports. Things to consider:
@@ -15,6 +20,8 @@
     3. Move full implementation to utils.h
     4. Ideally, rework logmel_viewer, spectrum_viewer ++ (to use same global packet header)
 */
+
+#include <signal.h>
 
 // Replaced by types.h probably
 #include <stdbool.h>
@@ -62,8 +69,6 @@ typedef struct
     char slave_name[64];
 } PtyPair;
 
-static PacketReader Reader;
-
 int set_baud(int fd, int baud)
 {
     struct termios2 t;
@@ -89,7 +94,7 @@ int set_baud(int fd, int baud)
     return ioctl(fd, TCSETS2, &t);
 }
 
-SerialPort open_serial_port(const char* port, int baud)
+SerialPort serial_open(const char* port, int baud)
 {
     int port_fd = open(port, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (port_fd < 0)
@@ -107,34 +112,34 @@ SerialPort open_serial_port(const char* port, int baud)
 }
 
 // TODO(sok): Check whether error handling works as anticipated
-bool32 read_latest_packet(int fd, QuantizedPacket* packet)
+bool32 read_latest_packet(int fd, PacketReader* reader, QuantizedPacket* packet)
 {
     bool32 packet_found = false;
 
     while (true)
     {
-        ssize_t bytes_read = read(fd, Reader.buf + Reader.len, sizeof(Reader.buf) - Reader.len);
+        ssize_t bytes_read = read(fd, reader->buf + reader->len, sizeof(reader->buf) - reader->len);
 
         if (bytes_read > 0)
         {
-            Reader.len += bytes_read;
+            reader->len += bytes_read;
 
             uint32_t offset = 0;
 
-            while (Reader.len - offset >= sizeof(uint32_t))
+            while (reader->len - offset >= sizeof(uint32_t))
             {
-                uint32_t magic_candidate = ((uint32_t)Reader.buf[offset + 3] << 24) |
-                                           ((uint32_t)Reader.buf[offset + 2] << 16) |
-                                           ((uint32_t)Reader.buf[offset + 1] <<  8) |
-                                            (uint32_t)Reader.buf[offset + 0];
+                uint32_t magic_candidate = ((uint32_t)reader->buf[offset + 3] << 24) |
+                                           ((uint32_t)reader->buf[offset + 2] << 16) |
+                                           ((uint32_t)reader->buf[offset + 1] <<  8) |
+                                            (uint32_t)reader->buf[offset + 0];
                 if (magic_candidate == MAGIC)
                 {
-                    if (Reader.len - offset < sizeof(QuantizedPacket))
+                    if (reader->len - offset < sizeof(QuantizedPacket))
                     {
                         break; // wait for more
                     }
                     // consume and update offset
-                    memcpy(packet, &Reader.buf[offset], sizeof(QuantizedPacket));
+                    memcpy(packet, &reader->buf[offset], sizeof(QuantizedPacket));
                     offset += sizeof(QuantizedPacket);
                     packet_found = true;
                 }
@@ -144,8 +149,8 @@ bool32 read_latest_packet(int fd, QuantizedPacket* packet)
                     ++offset;
                 }
             }
-            memmove(Reader.buf, Reader.buf + offset, Reader.len - offset);
-            Reader.len -= offset;
+            memmove(reader->buf, reader->buf + offset, reader->len - offset);
+            reader->len -= offset;
             continue;
         }
         if (bytes_read == 0)
@@ -188,7 +193,7 @@ PtyPair pty_create(const char* link_path)
         exit(EXIT_FAILURE);
     }
 
-    pty.master_fd = open(pty.slave_name, O_RDWR | O_NOCTTY);
+    pty.slave_fd = open(pty.slave_name, O_RDWR | O_NOCTTY);
     if (pty.slave_fd < 0 || set_baud(pty.slave_fd, 0))
     {
         perror("slave_fd configuration");
@@ -204,60 +209,80 @@ PtyPair pty_create(const char* link_path)
     {
         perror("symlink");
     }
+    snprintf(pty.link_name, sizeof(pty.link_name), "%s", link_path);
 
     printf("Simulated UART over %s (%s)\n", link_path, pty.slave_name);
 
     return pty;
 }
 
-// TODO(sok): Add error handling & consider merging write
-void pty_write(PtyPair pty, void* data, size_t len)
+int pty_write(PtyPair* pty, void* data, size_t len)
 {
-    ssize_t n = write(pty.master_fd, data, len);
+    ssize_t n = write(pty->master_fd, data, len);
+    if (n < (ssize_t)len) return false;
     if (n < 0 && errno == EAGAIN)
     {
-        ioctl(pty.slave_fd, TCFLSH, TCIFLUSH); // discard backlog, nobody reading from slave
-        n = write(pty.master_fd, data, len);
-        if (n < 0) perror("write");
+        ioctl(pty->slave_fd, TCFLSH, TCIFLUSH); // discard backlog, nobody reading from slave
+        n = write(pty->master_fd, data, len);
+        return (int)n;
     }
+    return (int)n;
 }
 
-// TODO(sok): Add error handling
-void write_serial_port(int port_fd, void* data, size_t len)
+int serial_write(SerialPort port, void* data, size_t len)
 {
-    ssize_t n = write(port_fd, data, len);
-    if (n < 0 && errno == EAGAIN)
-    {
-        perror("write");
-        exit(EXIT_FAILURE);
-    }
+    return write(port.fd, data, len);
+}
+
+void pty_close(PtyPair* pty)
+{
+    close(pty->master_fd);
+    close(pty->slave_fd);
+    unlink(pty->link_name);
+}
+
+static bool quit = false;
+
+void signal_handler(int sigint)
+{
+    (void)sigint;
+    quit = true;
 }
 
 int main(void)
 {
-    // int port_fd = open_serial_port("/dev/ttyACM0", 4194304);
+    // SerialPort port = serial_open("/dev/ttyACM0", 4194304);
     //
     // char character = 'c';
     // // char out;
     //
     // while (1)
     // {
-    //     write_serial_port(port_fd, &character, 1);
+    //     serial_write(port, &character, 1);
     //     usleep(500000);
     // }
 
+    signal(SIGINT, signal_handler);
+
+    PacketReader reader = {};
     QuantizedPacket packet;
 
-    SerialPort port = open_serial_port("/dev/ttyACM0", 4194304);
-    PtyPair pty = pty_create("/tmp/ttySIM0");                   // NOTE: MIGHT FAIL BECAUSE OF "ptsname_r" CHANGE
+    SerialPort port = serial_open("/dev/ttyACM0", 4194304);
+    PtyPair pty = pty_create("/tmp/ttySIM0");
 
-    while (true)
+    while (!quit)
     {
-        if (!read_latest_packet(port.fd, &packet)) break; // specific packet reader thing
-        pty_write(pty, &packet, sizeof(packet));
+        if (!read_latest_packet(port.fd, &reader, &packet)) break; // specific packet reader thing
+        pty_write(&pty, &packet, sizeof(packet));
+
+        // printf("seq: %d, slave_fd: %d, slave_name: %s, link_name: %s\n", packet.header.seq, pty.slave_fd, pty.slave_name, pty.link_name);
+        // usleep(500000);
     }
 
-    printf("goodbye, thanks for playing\n");
+    pty_close(&pty);
+    close(port.fd);
+
+    printf("\nGoodbye, thanks for playing\n");
 
     return 0;
 }
