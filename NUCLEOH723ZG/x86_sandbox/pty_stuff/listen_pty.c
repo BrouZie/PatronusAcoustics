@@ -45,21 +45,24 @@ typedef struct
 
 typedef struct
 {
-    int     fd;
-    char    name[64];
     uint8_t buf[sizeof(QuantizedPacket) * 4];
     size_t  len;
 } PacketReader;
 
 typedef struct
 {
-    int   master_fd;
-    int   slave_fd;
-    char* slave_name;
+    int fd;
+} SerialPort;
+
+typedef struct
+{
+    int  master_fd;
+    int  slave_fd;
+    char link_name[64];
+    char slave_name[64];
 } PtyPair;
 
 static PacketReader Reader;
-static PtyPair Pty;
 
 int set_baud(int fd, int baud)
 {
@@ -86,29 +89,31 @@ int set_baud(int fd, int baud)
     return ioctl(fd, TCSETS2, &t);
 }
 
-void open_serial_port_rx(const char* port, int baud)
+SerialPort open_serial_port(const char* port, int baud)
 {
-    Reader.fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
-    if (Reader.fd < 0)
+    int port_fd = open(port, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (port_fd < 0)
     {
         perror("fd");
         exit(EXIT_FAILURE);
     }
 
-    set_baud(Reader.fd, baud);
-    ioctl(Reader.fd, TCFLSH, TCIFLUSH);
+    set_baud(port_fd, baud);
+    ioctl(port_fd, TCFLSH, TCIFLUSH);
 
-    snprintf(Reader.name, sizeof(Reader.name), "%s", port);
     printf("opened port: %s\n", port);
+
+    return (SerialPort) { .fd = port_fd };
 }
 
-bool32 read_serial_port(QuantizedPacket* packet)
+// TODO(sok): Check whether error handling works as anticipated
+bool32 read_latest_packet(int fd, QuantizedPacket* packet)
 {
     bool32 packet_found = false;
 
     while (true)
     {
-        ssize_t bytes_read = read(Reader.fd, Reader.buf + Reader.len, sizeof(Reader.buf) - Reader.len);
+        ssize_t bytes_read = read(fd, Reader.buf + Reader.len, sizeof(Reader.buf) - Reader.len);
 
         if (bytes_read > 0)
         {
@@ -161,102 +166,98 @@ bool32 read_serial_port(QuantizedPacket* packet)
         }
 
         // no packet, and no data available yet -> poll for more data
-        struct pollfd pfd = { .fd = Reader.fd, .events = POLLIN };
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
         if (poll(&pfd, 1, -1) == -1 && errno != EINTR)
         {
             perror("poll");
-            return -1;
+            return false;
         }
     }
 }
 
-void open_serial_port_tx(const char* port, int baud)
+PtyPair pty_create(const char* link_path)
 {
-    Pty.master_fd = posix_openpt(O_RDWR | O_NOCTTY);
-    if (Pty.master_fd < 0 || grantpt(Pty.master_fd) < 0 || unlockpt(Pty.master_fd) < 0 || (Pty.slave_name = ptsname(Pty.master_fd)) == NULL)
+    PtyPair pty = {0};
+
+    pty.master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+    if (pty.master_fd < 0 || grantpt(pty.master_fd) < 0
+            || unlockpt(pty.master_fd) < 0
+            || ptsname_r(pty.master_fd, pty.slave_name, sizeof(pty.slave_name)))
     {
         perror("posix_openpt");
         exit(EXIT_FAILURE);
     }
 
-    Pty.slave_fd = open(Pty.slave_name, O_RDWR | O_NOCTTY);
-    if (Pty.slave_fd < 0 || set_baud(Pty.slave_fd, baud))
+    pty.master_fd = open(pty.slave_name, O_RDWR | O_NOCTTY);
+    if (pty.slave_fd < 0 || set_baud(pty.slave_fd, 0))
     {
         perror("slave_fd configuration");
         exit(EXIT_FAILURE);
     }
 
     // set to non-blocking
-    fcntl(Pty.master_fd, F_SETFL, fcntl(Pty.master_fd, F_GETFL) | O_NONBLOCK);
+    fcntl(pty.master_fd, F_SETFL, fcntl(pty.master_fd, F_GETFL) | O_NONBLOCK);
 
     // Symlinking to deterministic name (pts are generated undeterministically from ptmx)
-    unlink(port);
-    if (symlink(Pty.slave_name, port) < 0)
+    unlink(link_path);
+    if (symlink(pty.slave_name, link_path) < 0)
     {
         perror("symlink");
     }
 
-    printf("Simulated UART over %s (%s)\n", port, Pty.slave_name);
+    printf("Simulated UART over %s (%s)\n", link_path, pty.slave_name);
+
+    return pty;
 }
 
-void write_serial_port(void* data, size_t len)
+// TODO(sok): Add error handling & consider merging write
+void pty_write(PtyPair pty, void* data, size_t len)
 {
-    int n = write(Pty.master_fd, data, len);
+    ssize_t n = write(pty.master_fd, data, len);
     if (n < 0 && errno == EAGAIN)
     {
-        ioctl(Pty.slave_fd, TCFLSH, TCIFLUSH); // discard backlog, nobody reading from slave
-        n = write(Pty.master_fd, data, len);
+        ioctl(pty.slave_fd, TCFLSH, TCIFLUSH); // discard backlog, nobody reading from slave
+        n = write(pty.master_fd, data, len);
+        if (n < 0) perror("write");
     }
 }
 
-void close_ports(void)
+// TODO(sok): Add error handling
+void write_serial_port(int port_fd, void* data, size_t len)
 {
-    close(Reader.fd);
-    close(Pty.master_fd);
-    close(Pty.slave_fd);
+    ssize_t n = write(port_fd, data, len);
+    if (n < 0 && errno == EAGAIN)
+    {
+        perror("write");
+        exit(EXIT_FAILURE);
+    }
 }
-
-/*
- * int main()
- * {
- *
- *     caller holds onto the file handle?  -> yes: [ ] no: [x]
- *     caller provides port name only?     -> yes: [ ] no: [x] -> we wanna provide baud rate 0 or something different
- *     separate initialization for rx/tx?  -> yes: [x] no: [ ]
- *     surface some error value to caller? -> yes: [x] no: [ ]
- *          - open_serial_port_rx() ->  yes: [x] no: [ ]
- *          - open_serial_port_tx() ->  yes: [x] no: [ ]
- *          - write_serial_port()   ->  yes: [x] no: [ ]
- *          - read_serial_port()    ->  yes: [x] no: [ ]
- *
- *     if (!open_serial_port_rx(&port, "/dev/ttyACM0", 4194304))
- *     {
- *         try again?
- *         exit(EXIT_FAILURE)?
- *         whatever?
- *     }
- *
- *     return 0;
- * }
- */
 
 int main(void)
 {
+    // int port_fd = open_serial_port("/dev/ttyACM0", 4194304);
+    //
+    // char character = 'c';
+    // // char out;
+    //
+    // while (1)
+    // {
+    //     write_serial_port(port_fd, &character, 1);
+    //     usleep(500000);
+    // }
+
     QuantizedPacket packet;
 
-    // NOTE: I SHOUDLN'T MANGLE THESE TWO, IT IS DISHONEST BECAUSE THEY ARE
-    // QUITE DIFFERENT REALLY! GIVE THEM PROPER NAMES! STOP WITH SUCKY ABSTRACTIONS!
-    open_serial_port_rx("/dev/ttyACM0", 4194304); // specific packet reader thing
-    open_serial_port_tx("/tmp/ttySIM0", 0);       // more of a pty-pair thingy
+    SerialPort port = open_serial_port("/dev/ttyACM0", 4194304);
+    PtyPair pty = pty_create("/tmp/ttySIM0");                   // NOTE: MIGHT FAIL BECAUSE OF "ptsname_r" CHANGE
 
     while (true)
     {
-        if (!read_serial_port(&packet)) break;
-        write_serial_port(&packet, sizeof(packet));
+        if (!read_latest_packet(port.fd, &packet)) break; // specific packet reader thing
+        pty_write(pty, &packet, sizeof(packet));
     }
 
     printf("goodbye, thanks for playing\n");
-    close_ports();
 
     return 0;
 }
