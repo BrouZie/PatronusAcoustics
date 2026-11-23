@@ -1,6 +1,7 @@
 #include "app_entry.h"
 
 #include "linker.h"
+#include "packet.h"
 #include "ics52000.h"
 #include "console.h"
 
@@ -16,22 +17,6 @@
 #ifdef REPORT_FRAMES
 #include "clock.h"
 #endif
-
-#define PACKED __attribute__((packed))
-
-// NOTE: The packet size should not exceed 13 421 bytes (at a baudrate of 4194304)
-// Baudrate / frame rate = max transfer per frame
-typedef struct PACKED
-{
-    uint32_t  magic;
-    uint32_t  seq;
-#ifdef X86_DEBUG
-    int16_t   pcm[MIC_COUNT][AUDIO_SAMPLES];
-#endif
-    float32_t mel[NUM_MEL_BANDS];
-    float32_t azimuth;
-    float32_t elevation;
-} Full_Packet;
 
 global AudioFrameView View                         DTCM;
 global PrevAudioFrame Prev                         DTCM;
@@ -63,7 +48,7 @@ void pack_full(const SRP_PHAT* srp, const Logmel* mel, Full_Packet* packet)
     packet->magic     = 0xDEADBEA7;
     packet->seq       = View.seq;
 #ifdef X86_DEBUG
-    memcpy(packet->pcm, View.frame->pcm, sizeof(View.frame->pcm));
+    packet->frame = *View.frame;
 #endif
     memcpy(packet->mel, mel, sizeof(*mel));
     packet->azimuth   = srp->azimuth;

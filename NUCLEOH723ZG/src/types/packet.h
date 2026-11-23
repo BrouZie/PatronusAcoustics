@@ -14,12 +14,15 @@
 
 typedef float float32_t;
 
+// NOTE: The packet size should not exceed 13 421 bytes (at a baudrate of 4194304)
+// Baudrate / frame rate = max transfer per frame
 typedef struct PACKED
 {
     uint32_t  magic;
     uint32_t  seq;
+#define X86_DEBUG // TODO: Change macro name - potentially tie it to "x86 as orchestrator builds"
 #ifdef X86_DEBUG
-    int16_t   pcm[MIC_COUNT][AUDIO_SAMPLES];
+    AudioFrame frame;
 #endif
     float32_t mel[NUM_MEL_BANDS];
     float32_t azimuth;

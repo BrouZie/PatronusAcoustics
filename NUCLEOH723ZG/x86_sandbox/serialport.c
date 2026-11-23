@@ -177,6 +177,9 @@ PtySymlink pty_link_open(const char* link_path)
     }
     snprintf(pty.link_name, sizeof(pty.link_name), "%s", link_path);
 
+    pty.master.state = OPEN;
+    pty.slave.state  = OPEN;
+
     return pty;
 }
 
