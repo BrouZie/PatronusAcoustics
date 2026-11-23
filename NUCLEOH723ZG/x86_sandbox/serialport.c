@@ -16,6 +16,7 @@ void serial_close(SerialPort* port)
 {
     close(port->fd);
     port->state = CLOSED;
+    port->reader.len = 0;
 }
 
 void pty_link_close(PtySymlink* pty)
@@ -70,9 +71,9 @@ SerialPort serial_open(const char* path, int baud)
     return port;
 }
 
-bool32 read_latest_packet(SerialPort* port, PacketReader* reader, Full_Packet* packet)
+bool32 read_latest_packet(SerialPort* p, Full_Packet* packet)
 {
-    if (port->state == CLOSED)
+    if (p->state == CLOSED)
     {
         return false;
     }
@@ -81,27 +82,27 @@ bool32 read_latest_packet(SerialPort* port, PacketReader* reader, Full_Packet* p
 
     while (true)
     {
-        ssize_t bytes_read = read(port->fd, reader->buf + reader->len, sizeof(reader->buf) - reader->len);
+        ssize_t bytes_read = read(p->fd, p->reader.buf + p->reader.len, sizeof(p->reader.buf) - p->reader.len);
         if (bytes_read > 0)
         {
-            reader->len += (size_t)bytes_read;
+            p->reader.len += (size_t)bytes_read;
 
             uint32_t offset = 0;
 
-            while (reader->len - offset >= sizeof(uint32_t))
+            while (p->reader.len - offset >= sizeof(uint32_t))
             {
-                uint32_t magic_candidate = ((uint32_t)reader->buf[offset + 3] << 24) |
-                                           ((uint32_t)reader->buf[offset + 2] << 16) |
-                                           ((uint32_t)reader->buf[offset + 1] <<  8) |
-                                            (uint32_t)reader->buf[offset + 0];
+                uint32_t magic_candidate = ((uint32_t)p->reader.buf[offset + 3] << 24) |
+                                           ((uint32_t)p->reader.buf[offset + 2] << 16) |
+                                           ((uint32_t)p->reader.buf[offset + 1] <<  8) |
+                                            (uint32_t)p->reader.buf[offset + 0];
                 if (magic_candidate == MAGIC)
                 {
-                    if (reader->len - offset < sizeof(Full_Packet))
+                    if (p->reader.len - offset < sizeof(Full_Packet))
                     {
                         break; // wait for more
                     }
                     // consume and update offset
-                    memcpy(packet, &reader->buf[offset], sizeof(Full_Packet));
+                    memcpy(packet, &p->reader.buf[offset], sizeof(Full_Packet));
                     offset += sizeof(Full_Packet);
                     packet_found = true;
                 }
@@ -111,14 +112,14 @@ bool32 read_latest_packet(SerialPort* port, PacketReader* reader, Full_Packet* p
                     ++offset;
                 }
             }
-            memmove(reader->buf, reader->buf + offset, reader->len - offset);
-            reader->len -= offset;
+            memmove(p->reader.buf, p->reader.buf + offset, p->reader.len - offset);
+            p->reader.len -= offset;
             continue;
         }
         if (bytes_read == 0)
         {
             // The port got closed
-            serial_close(port);
+            serial_close(p);
             return false;
         }
 
@@ -134,7 +135,7 @@ bool32 read_latest_packet(SerialPort* port, PacketReader* reader, Full_Packet* p
         }
 
         // no packet, and no data available yet -> poll for more data
-        struct pollfd pfd = { .fd = port->fd, .events = POLLIN };
+        struct pollfd pfd = { .fd = p->fd, .events = POLLIN };
         if (poll(&pfd, 1, -1) == -1 && errno == EINTR)
         {
             // Return false on interrupts when stuck polling

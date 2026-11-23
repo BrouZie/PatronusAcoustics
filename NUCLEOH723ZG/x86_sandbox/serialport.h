@@ -6,6 +6,12 @@
 
 #include <sys/types.h>
 
+typedef struct
+{
+    uint8_t buf[sizeof(Full_Packet) * 4];
+    size_t  len;
+} PacketReader;
+
 typedef enum {
     CLOSED, OPEN
 } PortState;
@@ -14,6 +20,8 @@ typedef struct
 {
     int fd;
     PortState state;
+
+    PacketReader reader;
 } SerialPort;
 
 typedef struct
@@ -24,12 +32,6 @@ typedef struct
     char link_name[64];
     char slave_name[64];
 } PtySymlink;
-
-typedef struct
-{
-    uint8_t buf[sizeof(Full_Packet) * 4];
-    size_t  len;
-} PacketReader;
 
 SerialPort serial_open (const char* path, int baud);
 ssize_t    serial_write(SerialPort* port, void* data, size_t len);
@@ -46,7 +48,6 @@ void       pty_link_close(PtySymlink* pty);
 
    PARAMETERS:
     port:   specifies where we read from - what port/file descriptor we poll.
-    reader: TODO(sok): coupled with the packet? Or just scratch buf? Or something else?
     packet: out parameter for the newly discovered packet.
 
    RETURN VALUE:
@@ -57,6 +58,6 @@ void       pty_link_close(PtySymlink* pty);
     packet: contains the latest packet, given the function returned `true`
 */
 // TODO(sok): Add magic from global header elns.
-bool32 read_latest_packet(SerialPort* port, PacketReader* reader, Full_Packet* packet);
+bool32 read_latest_packet(SerialPort* p, Full_Packet* packet);
 
 #endif // SERIALPORT_H

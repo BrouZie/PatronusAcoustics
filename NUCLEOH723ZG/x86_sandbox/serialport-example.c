@@ -29,14 +29,13 @@ int main()
     SerialPort port = serial_open(STM32_PATH, BAUD_RATE);
     // PtySymlink pty  = pty_link_open(SYMLINK_PATH);
 
-    PacketReader reader;
     Full_Packet packet;
 
     for (;;)
     {
         if (port.state == OPEN)
         {
-            if (!read_latest_packet(&port, &reader, &packet)) continue;
+            if (!read_latest_packet(&port, &packet)) continue;
             printf("magic: %x, seq: %d\n", packet.magic, packet.seq);
         }
         else
