@@ -62,6 +62,7 @@ SerialPort serial_open(const char* path, int baud)
     else
     {
         set_baud(port.fd, baud);
+        usleep(50 * 1000); // without sleep, in-flight samples from device aren't flushed, only kernel tty buffer!
         ioctl(port.fd, TCFLSH, TCIFLUSH);
         port.state = OPEN;
     }

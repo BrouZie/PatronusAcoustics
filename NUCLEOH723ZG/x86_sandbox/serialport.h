@@ -7,7 +7,7 @@
 #include <sys/types.h>
 
 typedef enum {
-    OPEN, CLOSED
+    CLOSED, OPEN
 } PortState;
 
 typedef struct
