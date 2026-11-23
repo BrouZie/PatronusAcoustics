@@ -133,7 +133,7 @@ internal inline void srp_map_lookup(const SRP_State* state, SRP_PHAT* srp)
             const float32_t uz = state->cos_el[el_idx] * state->cos_az[az_idx];
 
             float32_t power = 0.0f;
-            for (uint32_t pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
+            for (int32_t pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
             {
                 const Vec3*      d    = &state->pair_delta[pair_idx];
                 const float32_t* corr = srp->correlations[pair_idx];
@@ -152,7 +152,7 @@ internal inline void srp_map_lookup(const SRP_State* state, SRP_PHAT* srp)
 void dsp_compute_srp(const SRP_State* state, FFT_Spectrum* spec, SRP_PHAT* srp)
 {
     // Generation of correlation coefficionts
-    for (uint32_t pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
+    for (int32_t pair_idx = 0; pair_idx < NUM_MIC_PAIRS; ++pair_idx)
     {
         // Ensure scratch buffer is zeroed!
         memset(spec->scratch, 0, sizeof(spec->scratch));

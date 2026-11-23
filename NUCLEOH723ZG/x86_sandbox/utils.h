@@ -20,8 +20,6 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include "types.h"
-
 #define DR_WAV_IMPLEMENTATION
 #include "dr_wav.h"
 
@@ -79,48 +77,6 @@ static inline void write_audio_to_disk(void* data, int num_mics, int num_blocks,
 
     float duration = ((float)num_blocks * AUDIO_SAMPLES) / SAMPLE_RATE_HZ;
     printf("Written: %llu sample frames (%.2f seconds)\n", (unsigned long long)frames_written, duration);
-}
-
-// TODO: Smash into one unified util.h THIS IS NOT GOOD ENOUGH!
-
-static inline int open_vusart(const char* port_name)
-{
-    int master, slave;
-    char name[64];
-    struct termios tio;
-
-    if (openpty(&master, &slave, name, NULL, NULL) < 0)
-    {
-        perror("openpty failed");
-    }
-
-    tcgetattr(slave, &tio);
-    cfmakeraw(&tio);
-    tcsetattr(slave, TCSANOW, &tio);
-
-    // Non-blocking: if nobody is reading, drop data like a real UART would
-    fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK);
-
-    // Symlinking to more meaningful dev name
-    unlink(port_name);
-    if (symlink(name, port_name) < 0)
-    {
-        perror("symlink");
-    }
-
-    printf("Simulated UART over %s (%s)\n", port_name, name);
-
-    return master;
-}
-
-static inline void vusart_send(int fd, const void* data, size_t len)
-{
-    // Not handling perror - so as to not flood stdout
-    // whenever nothing is connected
-    if (write(fd, data, len) < 0)
-    {
-        // perror("write");
-    }
 }
 
 #endif // UTILS_H

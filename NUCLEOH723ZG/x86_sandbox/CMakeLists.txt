@@ -22,7 +22,9 @@ set_target_properties(CMSISDSP PROPERTIES SYSTEM ON)   # no -Wconversion noise f
 
 add_executable(x86
     simulation.c
-    main.c
+    serialport.c
+    # main.c
+    serialport-example.c
     ../src/dsp/dsp.c
 )
 
@@ -39,6 +41,5 @@ target_compile_options(x86 PRIVATE
     -Wall
     -Wextra
     -Wconversion
-    -Wsign-conversion
     -Wshadow
 )

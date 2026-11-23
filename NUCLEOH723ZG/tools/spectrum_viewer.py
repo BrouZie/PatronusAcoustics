@@ -1,10 +1,12 @@
 """Live spectrum viewer for the NUCLEO-H723ZG `fft` app.
 
 The app streams raw float32 frames over USART, one per audio block: `mics`
-channels of `bins` complex pairs (Re, Im interleaved), matching
-src/config/audio_config.h. There are no framing bytes, so the reader re-syncs
-on the one impossible case in the payload: the imaginary parts of DC and
-Nyquist are always exactly zero (see _expand_bins in src/dsp/spectrum.c).
+channels of FFT floats each, in the CMSIS-DSP arm_rfft_fast_f32 layout:
+
+    [Re(DC), Re(Nyquist), Re(1), Im(1), ..., Re(N/2-1), Im(N/2-1)]
+
+There are no framing bytes and no impossible values in this layout, so the
+reader can only reject byte-misaligned garbage (NaN/Inf).
 
 Run from the repo root with uv:
 
@@ -26,7 +28,7 @@ from pyqtgraph.Qt import QtCore
 RATE = 16000     # AUDIO_SAMPLE_RATE_HZ
 FFT  = 1024      # SPECTRUM_FFT_SIZE
 MICS = 1         # AUDIO_MIC_COUNT
-PORT = "/dev/ttyACM0"
+PORT = "/tmp/ttySIM0"
 BAUD = 4194304
 
 DB_RANGE = (-60.0, 40.0)
@@ -34,15 +36,11 @@ IDLE_TICKS = 100            # 20 ms timer tick -> warn after ~2 s of silence
 
 
 def frame_start_ok(off):
-    """A frame at byte offset off must have zero DC/Nyquist imaginary parts
-    on the first and last channels and no NaN/Inf anywhere."""
+    """A frame at byte offset off must be complete and contain no NaN/Inf."""
     if off + frame_bytes > len(buf):
         return False
     f = np.frombuffer(buf, np.float32, fl_frame, off)
-    last_ch = (mics - 1) * fl_ch
-    return (f[1] == 0.0 and f[fl_ch - 1] == 0.0 and
-            f[last_ch + 1] == 0.0 and f[fl_frame - 1] == 0.0 and
-            np.all(np.isfinite(f)))
+    return bool(np.all(np.isfinite(f)))
 
 
 def find_frame_start():
@@ -63,8 +61,9 @@ def show(frame):
 
     dbs = []
     for ch in range(mics):
-        re = frame[ch * fl_ch: (ch + 1) * fl_ch: 2]
-        im = frame[ch * fl_ch + 1: (ch + 1) * fl_ch: 2]
+        c = frame[ch * fl_ch: (ch + 1) * fl_ch]
+        re = np.r_[c[0], c[2::2], c[1]]     # DC, bins 1..N/2-1, Nyquist
+        im = np.r_[0.0, c[3::2], 0.0]
         dbs.append(10 * np.log10(re * re + im * im + 1e-12))
 
     for mag, db in zip(mags, dbs):
@@ -98,16 +97,15 @@ def poll():
 
 
 def main():
-    global mics, bins, fl_ch, fl_frame, frame_bytes, freqs, nyquist, port, buf
+    global mics, bins, fl_ch, fl_frame, frame_bytes, freqs, port, buf
     global idle_ticks, nframes, mags, pk_line, label
 
     mics = MICS
-    bins = FFT // 2 + 1
-    fl_ch = 2 * bins
+    bins = FFT // 2 + 1                 # displayed bins: DC..Nyquist
+    fl_ch = FFT                         # floats per channel on the wire
     fl_frame = MICS * fl_ch
     frame_bytes = fl_frame * 4
-    freqs = np.arange(bins) * RATE / (2 * (bins - 1))
-    nyquist = RATE / 2
+    freqs = np.arange(bins) * RATE / FFT
 
     try:
         port = serial.Serial(PORT, 115200, timeout=0)
