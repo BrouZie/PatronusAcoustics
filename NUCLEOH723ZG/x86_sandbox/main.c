@@ -1,4 +1,5 @@
 #include "simulation.h"
+#include "serialport.h"
 #include "utils.h"
 #include "dsp.h"
 
@@ -86,7 +87,7 @@ int main()
 
 #ifdef LOGMEL
 #ifndef BENCHMARK
-    int vusart = open_vusart("/tmp/ttySIM0");
+    PtySymlink pty = pty_link_open("/tmp/ttySIM0");
 #endif
 
     uint32_t seq = 0;
@@ -130,7 +131,7 @@ int main()
             Packet.cells[b] = quantize_db(Mel.frame[b]);
         }
     #ifndef BENCHMARK
-        vusart_send(vusart, &Packet, sizeof(Packet));
+        pty_link_write(&pty, &Packet, sizeof(Packet));
     #endif
 #endif // LOGMEL END
 #ifdef BENCHMARK
