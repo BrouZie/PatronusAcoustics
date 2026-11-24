@@ -32,18 +32,18 @@ void dsp_init_spectrum(void)
     populate_hann();
 }
 
-void dsp_compute_spectrum(const AudioFrame* frame, PrevAudioFrame* prev, FFT_Spectrum* spec)
+void dsp_compute_spectrum(const AudioFrame* frame, FFT_Spectrum* spec)
 {
     for (uint32_t mic_idx = 0; mic_idx < MIC_COUNT; ++mic_idx)
     {
         for (uint32_t sample_idx = 0; sample_idx < AUDIO_SAMPLES; ++sample_idx)
         {
             uint32_t new_half = AUDIO_SAMPLES + sample_idx;
-            spec->scratch[sample_idx] = (float32_t)prev->pcm[mic_idx][sample_idx] / (float32_t)SCALING_FACTOR(sample_t);
+            spec->scratch[sample_idx] = (float32_t)spec->prev[mic_idx][sample_idx] / (float32_t)SCALING_FACTOR(sample_t);
             spec->scratch[new_half]   = (float32_t)frame->pcm[sample_idx][mic_idx] / (float32_t)SCALING_FACTOR(sample_t);
 
             // Save frame for next iteration
-            prev->pcm[mic_idx][sample_idx] = frame->pcm[sample_idx][mic_idx];
+            spec->prev[mic_idx][sample_idx] = frame->pcm[sample_idx][mic_idx];
         }
         // Remove DC offset drift (should be ~0)
         float32_t mean;

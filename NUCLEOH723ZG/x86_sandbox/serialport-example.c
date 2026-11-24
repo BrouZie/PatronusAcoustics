@@ -31,13 +31,11 @@
 
 int main()
 {
-    FFT_Spectrum   spec = {};
-    PrevAudioFrame prev = {};
-
-    dsp_init_spectrum();
-
     SerialPort port = serial_open(STM32_PATH, BAUD_RATE);
     PtySymlink pty  = pty_link_open(SYMLINK_PATH);
+
+    FFT_Spectrum spec = {};
+    dsp_init_spectrum();
 
     Full_Packet packet = {};
 
@@ -54,7 +52,7 @@ int main()
             port = serial_open(STM32_PATH, BAUD_RATE);
         }
 
-        dsp_compute_spectrum(&packet.frame, &prev, &spec);
+        dsp_compute_spectrum(&packet.frame, &spec);
         pty_link_write(&pty, &spec.bins[0], sizeof(spec.bins[0]));
     }
 

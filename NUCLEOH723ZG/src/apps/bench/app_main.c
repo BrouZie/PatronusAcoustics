@@ -24,7 +24,6 @@ typedef struct PACKED
 } Full_Packet;
 
 global AudioFrameView View                         DTCM;
-global PrevAudioFrame Prev                         DTCM;
 global FFT_Spectrum   Spec                         RAM1;
 global SRP_State      State                        RAM1;
 global SRP_PHAT       Srp                          DTCM;
@@ -78,7 +77,7 @@ void app_main(void)
         {
             BENCHMARK_BEGIN();
 
-            dsp_compute_spectrum(View.frame, &Prev, &Spec);
+            dsp_compute_spectrum(View.frame, &Spec);
             dsp_compute_srp(&State, &Spec, &Srp);
             dsp_beamform_delay_sum(&Spec, &MicPositions, Srp.azimuth, Srp.elevation, BeamSpectrum);
             dsp_compute_logmel_frame(Spec.scratch, BeamSpectrum, &Mel);

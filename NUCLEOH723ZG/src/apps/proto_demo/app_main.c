@@ -54,7 +54,6 @@ global float32_t BeamSpectrum[DSP_BUFFER_LEN] DTCM;
 #endif // LOGMEL
 
 global AudioFrameView  View   DTCM;
-global PrevAudioFrame  Prev   DTCM;
 global FFT_Spectrum    Spec   RAM1; // slight penalty (~0.10ms) for placing
 global SRP_State       State  RAM1; // these two in RAM1 instead of DTCM
 global SRP_PHAT        Srp    DTCM;
@@ -91,7 +90,7 @@ void app_main(void)
         {
             continue;
         }
-        dsp_compute_spectrum(View.frame, &Prev, &Spec);
+        dsp_compute_spectrum(View.frame, &Spec);
         dsp_compute_srp(&State, &Spec, &Srp);
 
 #ifndef LOGMEL

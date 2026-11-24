@@ -28,7 +28,6 @@ global const MicArray MicPositions = { {
     { -0.127037f,  0.041277f, 0.0f }, // mic 4: left
 } };
 
-global PrevAudioFrame Prev;
 global FFT_Spectrum Spec;
 
 global SRP_PHAT Srp;
@@ -80,7 +79,7 @@ int main()
 
     // Fill first half of spectrum
     dsp_init_spectrum();
-    dsp_compute_spectrum(View.frame, &Prev, &Spec);
+    dsp_compute_spectrum(View.frame, &Spec);
     dsp_init_srp(&Grid, &MicPositions, &State);
 
     bool32 quit = false;
@@ -102,7 +101,7 @@ int main()
     while (!quit)
     {
         sim_produce_frame(&R, &View, MicPositions, SourceDirection);
-        dsp_compute_spectrum(View.frame, &Prev, &Spec);
+        dsp_compute_spectrum(View.frame, &Spec);
 
         // SRP-PHAT
         dsp_compute_srp(&State, &Spec, &Srp);

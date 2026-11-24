@@ -19,7 +19,6 @@
 #endif
 
 global AudioFrameView View                         DTCM;
-global PrevAudioFrame Prev                         DTCM;
 global FFT_Spectrum   Spec                         RAM1;
 global SRP_State      State                        RAM1;
 global SRP_PHAT       Srp                          DTCM;
@@ -75,7 +74,7 @@ void app_main(void)
             continue;
         }
 
-        dsp_compute_spectrum(View.frame, &Prev, &Spec);
+        dsp_compute_spectrum(View.frame, &Spec);
         dsp_compute_srp(&State, &Spec, &Srp);
 #ifdef SRP_ONLY
         printf("x: %.2f\ty: %.2f\r\n", Srp.azimuth, Srp.elevation);

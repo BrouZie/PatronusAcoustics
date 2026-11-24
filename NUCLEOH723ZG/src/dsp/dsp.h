@@ -46,13 +46,11 @@ enum
 // Structs for FFT spectrum and general DSP
 typedef struct
 {
-    sample_t pcm[MIC_COUNT][AUDIO_SAMPLES];
-} PrevAudioFrame;
-
-typedef struct
-{
     float32_t bins[MIC_COUNT][DSP_BUFFER_LEN];
     float32_t scratch[DSP_BUFFER_LEN];
+
+    // Non - interleaved!
+    sample_t prev[MIC_COUNT][AUDIO_SAMPLES];
 } FFT_Spectrum;
 
 // SRP-PHAT structs
@@ -105,7 +103,7 @@ typedef struct
 } Logmel;
 
 void dsp_init_spectrum(void);
-void dsp_compute_spectrum(const AudioFrame* frame, PrevAudioFrame* prev, FFT_Spectrum* spectra);
+void dsp_compute_spectrum(const AudioFrame* frame, FFT_Spectrum* spectra);
 
 void dsp_init_srp(const SRP_Grid* grid, const MicArray* pos, SRP_State* state);
 void dsp_compute_srp(const SRP_State* state, FFT_Spectrum* spec, SRP_PHAT* srp);
